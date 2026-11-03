@@ -1,9 +1,12 @@
 name: Supabase
 
-# Aplica supabase/schema.sql a la base de datos cada vez que cambia.
-# Necesita dos secretos del repositorio (Settings → Secrets and variables → Actions):
-#   SUPABASE_DB_URL  → cadena "Session pooler" de Supabase (con la contraseña)
-#   CLAVE_CORREO     → la misma clave escrita en el Apps Script de correos
+# Aplica la base de datos (supabase/schema.sql) y publica la función de correos
+# (supabase/functions/correo) cada vez que cambian.
+# Secretos del repositorio (Settings → Secrets and variables → Actions):
+#   SUPABASE_DB_URL        → cadena "Session pooler" de Supabase (con la contraseña)
+#   CLAVE_CORREO           → clave compartida entre la base de datos y la función de correos
+#   SUPABASE_ACCESS_TOKEN  → token personal de Supabase (Account → Access Tokens)
+#   GMAIL_APP_PASSWORD     → contraseña de aplicación de reservaspizzburger@gmail.com
 
 on:
   push:
@@ -15,8 +18,12 @@ concurrency:
   group: supabase
   cancel-in-progress: false
 
+env:
+  PROJECT_REF: qmkrkqsnvlsjdfrdejxk
+  GMAIL_USER: reservaspizzburger@gmail.com
+
 jobs:
-  aplicar:
+  base-de-datos:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -57,3 +64,50 @@ jobs:
           psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -At -c "select 'Reservas: ' || count(*) from pzb.reservas"
           psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -At -c "select 'Clientes: ' || count(*) from pzb.clientes"
           psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -At -c "select 'Correos configurados: ' || case when exists (select 1 from pzb.secretos where clave = 'mailer_clave') then 'sí' else 'no' end"
+
+  correos:
+    runs-on: ubuntu-latest
+    needs: base-de-datos
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Comprobar secretos
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+          CLAVE_CORREO: ${{ secrets.CLAVE_CORREO }}
+        run: |
+          falta=0
+          [ -z "$SUPABASE_ACCESS_TOKEN" ] && echo "::error::Falta el secreto SUPABASE_ACCESS_TOKEN." && falta=1
+          [ -z "$GMAIL_APP_PASSWORD" ] && echo "::error::Falta el secreto GMAIL_APP_PASSWORD." && falta=1
+          [ -z "$CLAVE_CORREO" ] && echo "::error::Falta el secreto CLAVE_CORREO." && falta=1
+          exit $falta
+
+      - uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      - name: Guardar secretos de la función
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+          CLAVE_CORREO: ${{ secrets.CLAVE_CORREO }}
+        run: |
+          supabase secrets set --project-ref "$PROJECT_REF" \
+            "CLAVE_CORREO=$CLAVE_CORREO" "GMAIL_USER=$GMAIL_USER" "GMAIL_APP_PASSWORD=$GMAIL_APP_PASSWORD" > /dev/null
+          echo "Secretos guardados"
+
+      - name: Publicar función de correos
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+        run: supabase functions deploy correo --project-ref "$PROJECT_REF" --no-verify-jwt
+
+      - name: Correo de prueba
+        env:
+          CLAVE_CORREO: ${{ secrets.CLAVE_CORREO }}
+        run: |
+          body=$(jq -n --arg k "$CLAVE_CORREO" --arg e "$GMAIL_USER" \
+            '{clave:$k, tipo:"prueba", reserva:{}, config:{nombre:"Pizzburger", emailRestaurante:$e}}')
+          r=$(curl -sS -X POST "https://$PROJECT_REF.supabase.co/functions/v1/correo" -H 'Content-Type: application/json' -d "$body")
+          echo "Respuesta: $r"
+          echo "$r" | jq -e '.ok == true' > /dev/null || { echo "::error::La función de correos no pudo enviar el correo de prueba."; exit 1; }

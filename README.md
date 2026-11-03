@@ -11,7 +11,7 @@ App de reservas propia: página pública para clientes y panel interno.
 |---|---|---|
 | `index.html`, `admin.html`, `config.js` | GitHub Pages | Solo, al subir cambios a `main` |
 | `supabase/schema.sql` (base de datos y toda la lógica) | Supabase | Solo, con la acción «Supabase» de GitHub |
-| `apps-script-correos.gs` (envío de correos) | Google Apps Script de reservaspizzburger@gmail.com | A mano, solo si cambia este archivo (casi nunca) |
+| `supabase/functions/correo` (envío de correos desde Gmail) | Supabase Edge Functions | Solo, con la acción «Supabase» de GitHub |
 
 **Base de datos (Supabase, esquema privado `pzb`):** reservas, mesas, servicios, aperturas, config, clientes, auditoria, personal y secretos. Desde la web solo se puede llamar a dos funciones:
 - `publico(p)`: la página de reservas (horarios, reservar, ver y cancelar con el código del correo).
@@ -23,12 +23,14 @@ App de reservas propia: página pública para clientes y panel interno.
 
 Las contraseñas se cambian en Supabase → Authentication → Users. El registro de usuarios nuevos tiene que estar desactivado.
 
-**Correos:** Supabase los encarga con `pg_net` al Apps Script, que los envía desde Gmail. La clave compartida es el secreto `CLAVE_CORREO` de GitHub y la constante `CLAVE` del Apps Script. Los recordatorios (~2 h antes) los lanza `pg_cron` cada 15 minutos.
+**Correos:** la base de datos los encarga con `pg_net` a la función `correo`, que los envía por Gmail (smtp.gmail.com:465) con una contraseña de aplicación. Los recordatorios (~2 h antes) los lanza `pg_cron` cada 15 minutos.
 
 ## Secretos de GitHub (Settings → Secrets and variables → Actions)
 
 - `SUPABASE_DB_URL`: cadena «Session pooler» de Supabase (Connect). La contraseña debe ir sin símbolos como @ / # :, o codificada.
-- `CLAVE_CORREO`: la misma clave que `CLAVE` en el Apps Script.
+- `CLAVE_CORREO`: clave compartida entre la base de datos y la función de correos.
+- `SUPABASE_ACCESS_TOKEN`: token personal de Supabase (Account → Access Tokens), para publicar la función.
+- `GMAIL_APP_PASSWORD`: contraseña de aplicación de reservaspizzburger@gmail.com (Cuenta de Google → Seguridad → Contraseñas de aplicaciones).
 
 ## Cómo funciona la disponibilidad
 

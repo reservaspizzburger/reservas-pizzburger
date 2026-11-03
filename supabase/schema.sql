@@ -187,10 +187,10 @@ insert into pzb.personal (email, rol) values
   ('admin@pizzburger.app', 'admin')
 on conflict (email) do nothing;
 
--- Dirección del Apps Script que envía los correos (la clave llega desde GitHub)
+-- Función de Supabase que envía los correos (supabase/functions/correo). La clave llega desde GitHub.
 insert into pzb.secretos (clave, valor) values
-  ('mailer_url', 'https://script.google.com/macros/s/AKfycbw8woqhwYriUOv9VQidnCNPjEgAQuxXqQrCx56SiSeAVejDrOF3-Zi8Bj80D5HcEyXj/exec')
-on conflict (clave) do nothing;
+  ('mailer_url', 'https://qmkrkqsnvlsjdfrdejxk.supabase.co/functions/v1/correo')
+on conflict (clave) do update set valor = excluded.valor;
 
 /* ------------------------------------------------------------
  *  UTILIDADES
@@ -389,7 +389,7 @@ begin
 end $$;
 
 /* ------------------------------------------------------------
- *  CORREOS (los envía el Apps Script; aquí solo se encargan)
+ *  CORREOS (los envía la función "correo"; aquí solo se encargan)
  * ------------------------------------------------------------ */
 
 create or replace function pzb.correo(p_tipo text, r pzb.reservas) returns boolean language plpgsql volatile as $$
@@ -863,7 +863,7 @@ begin
   r.id := 'PRUEBA'; r.fecha := pzb.hoy(); r.hora := '21:00'; r.personas := 2; r.nombre := 'Prueba';
   r.email := pzb.cfg('emailRestaurante'); r.codigo := ''; r.estado := 'Confirmada';
   if not pzb.correo('prueba', r) then
-    return jsonb_build_object('ok', false, 'error', 'Los correos aún no están configurados (falta la clave en GitHub o la dirección del Apps Script).');
+    return jsonb_build_object('ok', false, 'error', 'Los correos aún no están configurados (falta el secreto CLAVE_CORREO en GitHub).');
   end if;
   return jsonb_build_object('ok', true, 'email', pzb.cfg('emailRestaurante'));
 end $$;

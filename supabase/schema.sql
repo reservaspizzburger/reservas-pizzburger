@@ -3,7 +3,7 @@
 -- ============================================================
 --  Este archivo se aplica SOLO desde GitHub (Actions → "Supabase")
 --  cada vez que cambia. Se puede ejecutar las veces que haga falta:
---  no borra datos ni duplica nada. (v3)
+--  no borra datos ni duplica nada. (v4: sin correos)
 --
 --  Todo vive en el esquema privado "pzb" (no accesible desde fuera).
 --  La web y el panel solo pueden llamar a dos funciones:
@@ -14,8 +14,21 @@
 create schema if not exists pzb;
 revoke all on schema pzb from public;
 
-do $$ begin create extension if not exists pg_net; exception when others then raise notice 'pg_net no disponible: %', sqlerrm; end $$;
-do $$ begin create extension if not exists pg_cron; exception when others then raise notice 'pg_cron no disponible: %', sqlerrm; end $$;
+/* ------------------------------------------------------------
+ *  LIMPIEZA DEL CORREO (la app ya no envía correos)
+ *  Se deja aquí, idempotente, para retirar lo que hubiera en la
+ *  base de datos de antes. Las extensiones pg_net y pg_cron no se
+ *  tocan: quedan instaladas pero sin uso.
+ * ------------------------------------------------------------ */
+
+do $$ begin
+  perform cron.unschedule('pzb-recordatorios');
+exception when others then null; end $$;
+
+drop function if exists pzb.enviar_recordatorios();
+drop function if exists pzb.panel_correo_prueba();
+drop function if exists pzb.correo(text, pzb.reservas);
+drop table if exists pzb.secretos;
 
 /* ------------------------------------------------------------
  *  TABLAS
@@ -55,11 +68,6 @@ create table if not exists pzb.config (
   valor text not null default ''
 );
 
-create table if not exists pzb.secretos (
-  clave text primary key,
-  valor text not null
-);
-
 create table if not exists pzb.personal (
   email text primary key,
   rol text not null check (rol in ('equipo', 'admin'))
@@ -82,9 +90,9 @@ create table if not exists pzb.reservas (
   notas text not null default '',
   estado text not null default 'Confirmada',
   origen text not null default 'panel',
-  codigo text not null default (replace(gen_random_uuid()::text, '-', '') || replace(gen_random_uuid()::text, '-', '')),
-  recordatorio text not null default ''
+  codigo text not null default (replace(gen_random_uuid()::text, '-', '') || replace(gen_random_uuid()::text, '-', ''))
 );
+alter table pzb.reservas drop column if exists recordatorio;
 create index if not exists reservas_fecha_idx on pzb.reservas (fecha);
 create index if not exists reservas_email_idx on pzb.reservas (email);
 
@@ -169,28 +177,21 @@ insert into pzb.config (clave, valor) values
   ('logo', ''),
   ('telefono', ''),
   ('direccion', 'Trujillo'),
-  ('emailRestaurante', 'reservaspizzburger@gmail.com'),
-  ('urlPublica', 'https://reservaspizzburger.github.io/reservas-pizzburger/'),
-  ('asuntoConfirmacion', 'Reserva confirmada · Pizzburger'),
-  ('textoConfirmacion', 'Tu reserva está confirmada. ¡Te esperamos!'),
-  ('textoRecordatorio', 'Te recordamos tu próxima reserva.'),
   ('condiciones', ''),
   ('privacidad', ''),
   ('diasAntelacion', '60'),
   ('minutosAntelacion', '60'),
-  ('maxPersonasWeb', '10'),
-  ('avisarRestaurante', 'si')
+  ('maxPersonasWeb', '10')
 on conflict (clave) do nothing;
+
+-- Ajustes que solo servían para los correos
+delete from pzb.config where clave in
+  ('emailRestaurante', 'urlPublica', 'asuntoConfirmacion', 'textoConfirmacion', 'textoRecordatorio', 'avisarRestaurante');
 
 insert into pzb.personal (email, rol) values
   ('equipo@pizzburger.app', 'equipo'),
   ('admin@pizzburger.app', 'admin')
 on conflict (email) do nothing;
-
--- Función de Supabase que envía los correos (supabase/functions/correo). La clave llega desde GitHub.
-insert into pzb.secretos (clave, valor) values
-  ('mailer_url', 'https://qmkrkqsnvlsjdfrdejxk.supabase.co/functions/v1/correo')
-on conflict (clave) do update set valor = excluded.valor;
 
 /* ------------------------------------------------------------
  *  UTILIDADES
@@ -288,7 +289,7 @@ create or replace function pzb.reserva_json(r pzb.reservas, con_codigo boolean d
     'id', r.id, 'creada', pzb.txt_ts(r.creada), 'actualizada', pzb.txt_ts(r.actualizada),
     'fecha', pzb.txt_f(r.fecha), 'hora', r.hora, 'servicio', r.servicio, 'personas', r.personas, 'mesa', r.mesa,
     'nombre', r.nombre, 'apellidos', r.apellidos, 'email', r.email, 'telefono', r.telefono,
-    'alergias', r.alergias, 'notas', r.notas, 'estado', r.estado, 'origen', r.origen, 'recordatorio', r.recordatorio
+    'alergias', r.alergias, 'notas', r.notas, 'estado', r.estado, 'origen', r.origen
   ) || case when con_codigo then jsonb_build_object('codigo', r.codigo) else '{}'::jsonb end
 $$;
 
@@ -389,47 +390,6 @@ begin
 end $$;
 
 /* ------------------------------------------------------------
- *  CORREOS (los envía la función "correo"; aquí solo se encargan)
- * ------------------------------------------------------------ */
-
-create or replace function pzb.correo(p_tipo text, r pzb.reservas) returns boolean language plpgsql volatile as $$
-declare v_url text; v_clave text;
-begin
-  select valor into v_url from pzb.secretos where clave = 'mailer_url';
-  select valor into v_clave from pzb.secretos where clave = 'mailer_clave';
-  if coalesce(v_url, '') = '' or coalesce(v_clave, '') = '' then return false; end if;
-  if p_tipo not like 'aviso_%' and p_tipo <> 'prueba' and coalesce(r.email, '') = '' then return false; end if;
-  perform net.http_post(
-    url := v_url,
-    body := jsonb_build_object('clave', v_clave, 'tipo', p_tipo, 'reserva', pzb.reserva_json(r, true), 'config', pzb.config_json()),
-    headers := '{"Content-Type": "application/json"}'::jsonb,
-    timeout_milliseconds := 20000);
-  return true;
-exception when others then
-  raise warning 'No se pudo encargar el correo %: %', p_tipo, sqlerrm;
-  return false;
-end $$;
-
--- Recordatorio ~2 h antes (lo lanza pg_cron cada 15 minutos)
-create or replace function pzb.enviar_recordatorios() returns int language plpgsql volatile as $$
-declare r pzb.reservas; n int := 0; ok boolean;
-begin
-  for r in select * from pzb.reservas
-           where estado = 'Confirmada' and recordatorio = '' and email <> ''
-             and fecha between pzb.hoy() and pzb.hoy() + 1
-             and (fecha + pzb.norm_hora(hora)::time) > pzb.ahora()
-             and (fecha + pzb.norm_hora(hora)::time) <= pzb.ahora() + interval '120 minutes'
-           for update skip locked
-  loop
-    ok := pzb.correo('recordatorio', r);
-    update pzb.reservas set recordatorio = case when ok then pzb.txt_ts(pzb.ahora()) else 'error ' || pzb.txt_ts(pzb.ahora()) end
-      where id = r.id;
-    n := n + 1;
-  end loop;
-  return n;
-end $$;
-
-/* ------------------------------------------------------------
  *  PÁGINA PÚBLICA
  * ------------------------------------------------------------ */
 
@@ -475,11 +435,11 @@ begin
 end $$;
 
 create or replace function pzb.pub_reservar(p jsonb) returns jsonb language plpgsql volatile as $$
-declare r pzb.reservas; f date := pzb.fecha_ok(p ->> 'fecha'); v text; dup pzb.reservas; v_mesa text;
-  maxp int := coalesce(nullif(pzb.cfg('maxPersonasWeb'), '')::int, 10); enviado boolean;
+declare r pzb.reservas; f date := pzb.fecha_ok(p ->> 'fecha'); v text; v_mesa text;
+  maxp int := coalesce(nullif(pzb.cfg('maxPersonasWeb'), '')::int, 10);
 begin
   if coalesce(p ->> 'web', '') <> '' then -- campo trampa anti-bots
-    return jsonb_build_object('ok', true, 'reservaId', 'x', 'correoEnviado', true);
+    return jsonb_build_object('ok', true, 'reservaId', 'x');
   end if;
   v := pzb.validar_fecha_web(f);
   if v <> '' then return jsonb_build_object('ok', false, 'error', v); end if;
@@ -489,19 +449,22 @@ begin
   r.personas := coalesce(nullif(regexp_replace(coalesce(p ->> 'personas', ''), '\D', '', 'g'), '')::int, 0);
   r.nombre := pzb.limpiar(p ->> 'nombre', 60);
   r.apellidos := pzb.limpiar(p ->> 'apellidos', 80);
-  r.email := lower(pzb.limpiar(p ->> 'email', 120));
+  r.email := '';
   r.telefono := pzb.limpiar(p ->> 'telefono', 30);
   r.alergias := pzb.limpiar(p ->> 'alergias', 500);
   if r.personas < 1 or r.personas > maxp then return jsonb_build_object('ok', false, 'error', 'Número de personas no válido'); end if;
   if r.nombre = '' or r.apellidos = '' then return jsonb_build_object('ok', false, 'error', 'Escribe tu nombre y apellidos'); end if;
-  if not pzb.email_ok(r.email) then return jsonb_build_object('ok', false, 'error', 'El correo no parece correcto'); end if;
   if length(regexp_replace(r.telefono, '\D', '', 'g')) < 9 then return jsonb_build_object('ok', false, 'error', 'El teléfono no parece correcto'); end if;
 
   perform pg_advisory_xact_lock(hashtext('pzb_reservas_' || f::text));
 
-  select * into dup from pzb.reservas x
-    where x.fecha = f and x.hora = r.hora and x.email = r.email and x.estado = any (pzb.activas()) limit 1;
-  if found then return jsonb_build_object('ok', true, 'reservaId', dup.id, 'correoEnviado', true, 'repetida', true); end if;
+  -- Misma reserva repetida (mismo teléfono, día y hora). Nunca se devuelve el código de la
+  -- reserva existente: con él se puede cancelar, y el teléfono de otra persona no es secreto.
+  if exists (select 1 from pzb.reservas x
+             where x.fecha = f and x.hora = r.hora and x.estado = any (pzb.activas())
+               and right(regexp_replace(x.telefono, '\D', '', 'g'), 9) = right(regexp_replace(r.telefono, '\D', '', 'g'), 9)) then
+    return jsonb_build_object('ok', false, 'error', 'Ya hay una reserva con ese teléfono a esa hora. Si quieres cambiarla o cancelarla, llámanos.');
+  end if;
 
   select h.mesa into v_mesa from pzb.horarios(f, r.personas, coalesce(nullif(pzb.cfg('minutosAntelacion'), '')::int, 0)) h
     where h.hora = r.hora and h.servicio = r.servicio limit 1;
@@ -511,9 +474,8 @@ begin
   values (pzb.nuevo_id(), r.fecha, r.hora, r.servicio, r.personas, v_mesa, r.nombre, r.apellidos, r.email, r.telefono, r.alergias, 'Confirmada', 'web')
   returning * into r;
   perform pzb.auditar(r.id, 'Creada', '', pzb.resumen(r), 'web');
-  enviado := pzb.correo('confirmacion', r);
-  if pzb.cfg('avisarRestaurante', 'si') <> 'no' then perform pzb.correo('aviso_nueva', r); end if;
-  return jsonb_build_object('ok', true, 'reservaId', r.id, 'correoEnviado', enviado);
+  -- El código de cancelación solo se entrega aquí, a quien acaba de reservar
+  return jsonb_build_object('ok', true, 'reservaId', r.id, 'codigo', r.codigo);
 end $$;
 
 create or replace function pzb.reserva_con_codigo(p jsonb) returns pzb.reservas language sql stable as $$
@@ -527,7 +489,7 @@ $$ select (r.fecha + coalesce(nullif(pzb.norm_hora(r.hora), ''), '23:59')::time)
 create or replace function pzb.pub_ver(p jsonb) returns jsonb language plpgsql stable as $$
 declare r pzb.reservas := pzb.reserva_con_codigo(p);
 begin
-  if r.id is null then return jsonb_build_object('ok', false, 'error', 'No encontramos esa reserva. Revisa el enlace del correo.'); end if;
+  if r.id is null then return jsonb_build_object('ok', false, 'error', 'No encontramos esa reserva. Revisa el enlace de cancelación.'); end if;
   return jsonb_build_object('ok', true, 'reserva', jsonb_build_object(
     'fecha', pzb.txt_f(r.fecha), 'hora', r.hora, 'personas', r.personas, 'nombre', r.nombre, 'estado', r.estado,
     'cancelable', r.estado = any (pzb.activas()) and not pzb.ya_pasada(r)));
@@ -536,7 +498,7 @@ end $$;
 create or replace function pzb.pub_cancelar(p jsonb) returns jsonb language plpgsql volatile as $$
 declare r pzb.reservas := pzb.reserva_con_codigo(p); antes text;
 begin
-  if r.id is null then return jsonb_build_object('ok', false, 'error', 'No encontramos esa reserva. Revisa el enlace del correo.'); end if;
+  if r.id is null then return jsonb_build_object('ok', false, 'error', 'No encontramos esa reserva. Revisa el enlace de cancelación.'); end if;
   select * into r from pzb.reservas where id = r.id for update;
   if r.estado = 'Cancelada' then return jsonb_build_object('ok', true, 'yaCancelada', true); end if;
   if not (r.estado = any (pzb.activas())) or pzb.ya_pasada(r) then
@@ -545,8 +507,6 @@ begin
   antes := r.estado;
   update pzb.reservas set estado = 'Cancelada', actualizada = pzb.ahora() where id = r.id returning * into r;
   perform pzb.auditar(r.id, 'Cancelada por el cliente', antes, 'Cancelada', 'web');
-  perform pzb.correo('cancelacion', r);
-  if pzb.cfg('avisarRestaurante', 'si') <> 'no' then perform pzb.correo('aviso_cancelacion', r); end if;
   return jsonb_build_object('ok', true);
 end $$;
 
@@ -597,8 +557,8 @@ end $$;
 
 create or replace function pzb.panel_guardar_reserva(p jsonb, p_rol text) returns jsonb language plpgsql volatile as $$
 declare e jsonb := coalesce(p -> 'reserva', '{}'); r pzb.reservas; antes pzb.reservas; s pzb.servicios;
-  v_ini int; v_fin int; v_mesa text; avisos jsonb := '[]'; choques text[] := '{}'; tipo text := '';
-  correo_ok boolean; forzar boolean := coalesce((p ->> 'forzar')::boolean, false); o record; es_nueva boolean;
+  v_ini int; v_fin int; v_mesa text; avisos jsonb := '[]'; choques text[] := '{}';
+  forzar boolean := coalesce((p ->> 'forzar')::boolean, false); o record; es_nueva boolean;
 begin
   es_nueva := coalesce(e ->> 'id', '') = '';
   if not es_nueva then
@@ -606,7 +566,7 @@ begin
     if not found then return jsonb_build_object('ok', false, 'error', 'No se encuentra esa reserva'); end if;
     r := antes;
   else
-    r.id := pzb.nuevo_id(); r.origen := 'panel'; r.estado := 'Confirmada'; r.recordatorio := '';
+    r.id := pzb.nuevo_id(); r.origen := 'panel'; r.estado := 'Confirmada';
     r.codigo := replace(gen_random_uuid()::text, '-', '') || replace(gen_random_uuid()::text, '-', '');
     r.creada := pzb.ahora();
   end if;
@@ -662,28 +622,21 @@ begin
 
   r.actualizada := pzb.ahora();
   if not es_nueva then
-    if antes.fecha <> r.fecha or antes.hora <> r.hora then r.recordatorio := ''; end if;
-    if (antes.fecha <> r.fecha or antes.hora <> r.hora or antes.personas <> r.personas) and r.estado = any (pzb.activas()) then tipo := 'modificacion'; end if;
-    if r.estado = 'Cancelada' and antes.estado <> 'Cancelada' then tipo := 'cancelacion'; end if;
     update pzb.reservas set fecha = r.fecha, hora = r.hora, servicio = r.servicio, personas = r.personas, mesa = r.mesa,
       nombre = r.nombre, apellidos = r.apellidos, email = r.email, telefono = r.telefono, alergias = r.alergias,
-      notas = r.notas, estado = r.estado, actualizada = r.actualizada, recordatorio = r.recordatorio
+      notas = r.notas, estado = r.estado, actualizada = r.actualizada
     where id = r.id returning * into r;
     perform pzb.auditar(r.id, 'Editada', pzb.resumen(antes), pzb.resumen(r), 'panel (' || p_rol || ')');
   else
     insert into pzb.reservas values (r.*) returning * into r;
     perform pzb.auditar(r.id, 'Creada', '', pzb.resumen(r), 'panel (' || p_rol || ')');
-    if r.estado = any (pzb.activas()) then tipo := 'confirmacion'; end if;
   end if;
 
-  if tipo <> '' and r.email <> '' and coalesce((p ->> 'enviarCorreo')::boolean, false) then
-    correo_ok := pzb.correo(tipo, r);
-  end if;
-  return jsonb_build_object('ok', true, 'reserva', pzb.reserva_json(r), 'avisos', avisos, 'correo', correo_ok);
+  return jsonb_build_object('ok', true, 'reserva', pzb.reserva_json(r), 'avisos', avisos);
 end $$;
 
 create or replace function pzb.panel_cambiar_estado(p jsonb, p_rol text) returns jsonb language plpgsql volatile as $$
-declare r pzb.reservas; antes text; v_estado text := coalesce(p ->> 'estado', ''); correo_ok boolean;
+declare r pzb.reservas; antes text; v_estado text := coalesce(p ->> 'estado', '');
 begin
   if not (v_estado = any (pzb.estados())) then return jsonb_build_object('ok', false, 'error', 'Estado no válido'); end if;
   select * into r from pzb.reservas where id = coalesce(p ->> 'id', '') for update;
@@ -691,10 +644,7 @@ begin
   antes := r.estado;
   update pzb.reservas set estado = v_estado, actualizada = pzb.ahora() where id = r.id returning * into r;
   perform pzb.auditar(r.id, 'Cambio de estado', antes, v_estado, 'panel (' || p_rol || ')');
-  if v_estado = 'Cancelada' and antes <> 'Cancelada' and coalesce((p ->> 'avisar')::boolean, false) and r.email <> '' then
-    correo_ok := pzb.correo('cancelacion', r);
-  end if;
-  return jsonb_build_object('ok', true, 'reserva', pzb.reserva_json(r), 'correo', correo_ok);
+  return jsonb_build_object('ok', true, 'reserva', pzb.reserva_json(r));
 end $$;
 
 create or replace function pzb.panel_auditoria() returns jsonb language sql stable as $$
@@ -772,15 +722,13 @@ end $$;
 
 create or replace function pzb.panel_guardar_config(p jsonb, p_rol text) returns jsonb language plpgsql volatile as $$
 declare k text; v text;
-  permitidas text[] := array['nombre', 'subtitulo', 'logo', 'telefono', 'direccion', 'emailRestaurante', 'urlPublica',
-    'asuntoConfirmacion', 'textoConfirmacion', 'textoRecordatorio', 'condiciones', 'privacidad',
-    'diasAntelacion', 'minutosAntelacion', 'maxPersonasWeb', 'avisarRestaurante'];
+  permitidas text[] := array['nombre', 'subtitulo', 'logo', 'telefono', 'direccion', 'condiciones', 'privacidad',
+    'diasAntelacion', 'minutosAntelacion', 'maxPersonasWeb'];
 begin
   for k, v in select key, value from jsonb_each_text(coalesce(p -> 'config', '{}')) loop
     if not (k = any (permitidas)) then continue; end if;
     v := left(coalesce(v, ''), case when k in ('condiciones', 'privacidad') then 20000 else 1000 end);
     if k = 'logo' and v <> '' and v not like 'https://%' then raise exception 'El logo debe ser una dirección que empiece por https://'; end if;
-    if k = 'emailRestaurante' and v <> '' and not pzb.email_ok(v) then raise exception 'El correo del restaurante no es válido'; end if;
     if k in ('diasAntelacion', 'minutosAntelacion', 'maxPersonasWeb') and v !~ '^\d{1,4}$' then raise exception 'Revisa el número de «%»', k; end if;
     insert into pzb.config (clave, valor) values (k, v) on conflict (clave) do update set valor = excluded.valor;
   end loop;
@@ -844,28 +792,17 @@ begin
                        when f < pzb.hoy() then 'Finalizada' else 'Confirmada' end;
     end if;
     s := pzb.servicio_de_hora(h);
-    insert into pzb.reservas (id, fecha, hora, servicio, personas, mesa, nombre, apellidos, email, telefono, alergias, notas, estado, origen, recordatorio)
+    insert into pzb.reservas (id, fecha, hora, servicio, personas, mesa, nombre, apellidos, email, telefono, alergias, notas, estado, origen)
     values (v_id, f, h, coalesce(s.servicio, ''),
       greatest(1, coalesce(nullif(regexp_replace(coalesce(x ->> 'personas', ''), '\D', '', 'g'), '')::int, 1)),
       pzb.limpiar(x ->> 'mesa', 20), pzb.limpiar(x ->> 'nombre', 60), pzb.limpiar(x ->> 'apellidos', 80),
       lower(pzb.limpiar(x ->> 'email', 120)), pzb.limpiar(x ->> 'telefono', 30), pzb.limpiar(x ->> 'alergias', 500),
-      pzb.limpiar(x ->> 'notas', 500), v_estado, 'vento', case when f < pzb.hoy() then 'importada' else '' end)
+      pzb.limpiar(x ->> 'notas', 500), v_estado, 'vento')
     on conflict (id) do nothing;
     if found then n := n + 1; else saltadas := saltadas + 1; end if;
   end loop;
   perform pzb.auditar('', 'Reservas importadas', '', n || ' importadas', 'panel (' || p_rol || ')');
   return jsonb_build_object('ok', true, 'importadas', n, 'saltadas', saltadas);
-end $$;
-
-create or replace function pzb.panel_correo_prueba() returns jsonb language plpgsql volatile as $$
-declare r pzb.reservas;
-begin
-  r.id := 'PRUEBA'; r.fecha := pzb.hoy(); r.hora := '21:00'; r.personas := 2; r.nombre := 'Prueba';
-  r.email := pzb.cfg('emailRestaurante'); r.codigo := ''; r.estado := 'Confirmada';
-  if not pzb.correo('prueba', r) then
-    return jsonb_build_object('ok', false, 'error', 'Los correos aún no están configurados (falta el secreto CLAVE_CORREO en GitHub).');
-  end if;
-  return jsonb_build_object('ok', true, 'email', pzb.cfg('emailRestaurante'));
 end $$;
 
 /* ------------------------------------------------------------
@@ -894,7 +831,7 @@ begin
   if v_rol is null then
     return jsonb_build_object('ok', false, 'sesion', false, 'error', 'Sesión caducada o usuario sin permiso. Vuelve a entrar.');
   end if;
-  if a in ('auditoria', 'guardarServicios', 'guardarMesas', 'guardarApertura', 'guardarConfig', 'correoPrueba',
+  if a in ('auditoria', 'guardarServicios', 'guardarMesas', 'guardarApertura', 'guardarConfig',
            'importarClientes', 'importarReservas') and v_rol <> 'admin' then
     return jsonb_build_object('ok', false, 'error', 'Esta opción necesita el acceso de administración.');
   end if;
@@ -909,7 +846,6 @@ begin
     when 'guardarMesas' then pzb.panel_guardar_mesas(p, v_rol)
     when 'guardarApertura' then pzb.panel_guardar_apertura(p, v_rol)
     when 'guardarConfig' then pzb.panel_guardar_config(p, v_rol)
-    when 'correoPrueba' then pzb.panel_correo_prueba()
     when 'importarClientes' then pzb.panel_importar_clientes(p, v_rol)
     when 'importarReservas' then pzb.panel_importar_reservas(p, v_rol)
     else jsonb_build_object('ok', false, 'error', 'Acción desconocida') end;
@@ -923,14 +859,6 @@ do $$ begin
   execute 'grant execute on function public.publico(jsonb) to anon, authenticated';
   execute 'grant execute on function public.panel(jsonb) to authenticated';
 exception when undefined_object then null; end $$;
-
-/* ------------------------------------------------------------
- *  RECORDATORIOS AUTOMÁTICOS (cada 15 minutos)
- * ------------------------------------------------------------ */
-
-do $$ begin
-  perform cron.schedule('pzb-recordatorios', '*/15 * * * *', 'select pzb.enviar_recordatorios()');
-exception when others then raise notice 'pg_cron no disponible: %', sqlerrm; end $$;
 
 -- Que la API vea los cambios al momento
 notify pgrst, 'reload schema';

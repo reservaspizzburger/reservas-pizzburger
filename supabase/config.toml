@@ -1,5 +1,0 @@
-project_id = "qmkrkqsnvlsjdfrdejxk"
-
-[functions.correo]
-# La protege la clave compartida CLAVE_CORREO, no el inicio de sesión
-verify_jwt = false

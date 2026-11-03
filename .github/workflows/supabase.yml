@@ -1,0 +1,59 @@
+name: Supabase
+
+# Aplica supabase/schema.sql a la base de datos cada vez que cambia.
+# Necesita dos secretos del repositorio (Settings → Secrets and variables → Actions):
+#   SUPABASE_DB_URL  → cadena "Session pooler" de Supabase (con la contraseña)
+#   CLAVE_CORREO     → la misma clave escrita en el Apps Script de correos
+
+on:
+  push:
+    branches: [main]
+    paths: ['supabase/**', '.github/workflows/supabase.yml']
+  workflow_dispatch:
+
+concurrency:
+  group: supabase
+  cancel-in-progress: false
+
+jobs:
+  aplicar:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Comprobar secretos
+        env:
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+        run: |
+          if [ -z "$SUPABASE_DB_URL" ]; then
+            echo "::error::Falta el secreto SUPABASE_DB_URL (Settings → Secrets and variables → Actions)."
+            exit 1
+          fi
+
+      - name: Instalar cliente de PostgreSQL
+        run: command -v psql || (sudo apt-get update -q && sudo apt-get install -y -q postgresql-client)
+
+      - name: Aplicar base de datos
+        env:
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+        run: psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -q -f supabase/schema.sql
+
+      - name: Guardar clave de correos
+        env:
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          CLAVE_CORREO: ${{ secrets.CLAVE_CORREO }}
+        run: |
+          if [ -z "$CLAVE_CORREO" ]; then echo "::warning::Falta el secreto CLAVE_CORREO: no se enviarán correos."; exit 0; fi
+          psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -q -v clave="$CLAVE_CORREO" <<'SQL'
+          insert into pzb.secretos (clave, valor) values ('mailer_clave', :'clave')
+          on conflict (clave) do update set valor = excluded.valor;
+          SQL
+
+      - name: Comprobar
+        env:
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+        run: |
+          psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -At -c "select 'Mesas: ' || count(*) from pzb.mesas"
+          psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -At -c "select 'Reservas: ' || count(*) from pzb.reservas"
+          psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -At -c "select 'Clientes: ' || count(*) from pzb.clientes"
+          psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -At -c "select 'Correos configurados: ' || case when exists (select 1 from pzb.secretos where clave = 'mailer_clave') then 'sí' else 'no' end"

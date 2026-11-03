@@ -24,7 +24,7 @@ const PIN_ADMIN_NUEVO = '';    // PIN de administración: además, configuració
 
 const HOJAS = {
   RESERVAS: 'RESERVAS', MESAS: 'MESAS', SERVICIOS: 'SERVICIOS',
-  APERTURAS: 'APERTURAS', CONFIG: 'CONFIG', AUDITORIA: 'AUDITORIA'
+  APERTURAS: 'APERTURAS', CONFIG: 'CONFIG', AUDITORIA: 'AUDITORIA', CLIENTES: 'CLIENTES'
 };
 
 const COLUMNAS = {
@@ -35,7 +35,8 @@ const COLUMNAS = {
   SERVICIOS: ['servicio', 'activo', 'dias', 'horas', 'duracion', 'capacidad'],
   APERTURAS: ['fecha', 'comidas', 'cenas'],
   CONFIG: ['clave', 'valor'],
-  AUDITORIA: ['fecha', 'reserva', 'accion', 'antes', 'despues', 'origen']
+  AUDITORIA: ['fecha', 'reserva', 'accion', 'antes', 'despues', 'origen'],
+  CLIENTES: ['clave', 'nombre', 'apellidos', 'email', 'telefono', 'primera', 'ultima', 'reservas', 'noVino', 'notas', 'origen']
 };
 
 const ESTADOS = ['Pendiente', 'Confirmada', 'Sentados', 'Finalizada', 'Cancelada', 'No presentado'];
@@ -117,6 +118,7 @@ function instalar() {
   crearHoja_(ss, HOJAS.CONFIG, COLUMNAS.CONFIG,
     Object.keys(CONFIG_DEF).map(function (k) { return [k, CONFIG_DEF[k]]; }));
   crearHoja_(ss, HOJAS.AUDITORIA, COLUMNAS.AUDITORIA, []);
+  crearHoja_(ss, HOJAS.CLIENTES, COLUMNAS.CLIENTES, []);
   if (hojaVacia && hojaVacia.getLastRow() === 0) ss.deleteSheet(hojaVacia);
 
   // PIN
@@ -229,7 +231,9 @@ function despachar_(d) {
       guardarMesas: ['admin', apiGuardarMesas_],
       guardarApertura: ['admin', apiGuardarApertura_],
       guardarConfig: ['admin', apiGuardarConfig_],
-      correoPrueba: ['admin', apiCorreoPrueba_]
+      correoPrueba: ['admin', apiCorreoPrueba_],
+      importarClientes: ['admin', apiImportarClientes_],
+      importarReservas: ['admin', apiImportarReservas_]
     };
     const def = privadas[accion];
     if (!def) return { ok: false, error: 'Acción desconocida' };
@@ -421,10 +425,19 @@ function reservaConCodigo_(id, codigo) {
  * ============================================================ */
 
 function apiDatos_(d, ses) {
-  const desde = sumarDias_(hoy_(), -400);
+  // Todas las reservas (también las antiguas importadas) para el historial de clientes
   const reservas = leer_(HOJAS.RESERVAS)
-    .filter(function (r) { return r.id && r.fecha >= desde; })
+    .filter(function (r) { return r.id; })
     .map(publicaReserva_);
+  let clientes = [];
+  try {
+    if (ss_().getSheetByName(HOJAS.CLIENTES)) {
+      clientes = leer_(HOJAS.CLIENTES).map(function (c) {
+        const o = {}; COLUMNAS.CLIENTES.forEach(function (k) { o[k] = c[k] === undefined ? '' : c[k]; });
+        o.reservas = Number(o.reservas) || 0; o.noVino = Number(o.noVino) || 0; return o;
+      });
+    }
+  } catch (e) { console.error(e); }
   return {
     ok: true, rol: ses.rol, hoy: hoy_(),
     reservas: reservas,
@@ -433,7 +446,8 @@ function apiDatos_(d, ses) {
       return { servicio: s.servicio, activo: s.activo, dias: s.dias, horas: s.horas, duracion: s.duracion, capacidad: s.capacidad };
     }),
     aperturas: aperturas_(),
-    config: config_()
+    config: config_(),
+    clientes: clientes
   };
 }
 
@@ -1078,6 +1092,112 @@ function recordatorios() {
   } finally {
     lock.releaseLock();
   }
+}
+
+/* ============================================================
+ *  IMPORTAR DESDE EL PANEL (Clientes → Importar de Vento)
+ * ============================================================ */
+
+function claveCliente_(email, telefono, nombre) {
+  const e = String(email || '').trim().toLowerCase();
+  if (e) return e;
+  const t = String(telefono || '').replace(/\D/g, '').replace(/^34(?=\d{9}$)/, '');
+  if (t) return 'tel:' + t;
+  const n = String(nombre || '').trim().toLowerCase();
+  return n ? 'n:' + n : '';
+}
+
+function fechaFlexible_(v) {
+  const s = String(v || '').trim();
+  let m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+  if (m) return m[1] + '-' + ('0' + m[2]).slice(-2) + '-' + ('0' + m[3]).slice(-2);
+  m = s.match(/^(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{2,4})/);
+  if (m) { const y = m[3].length === 2 ? '20' + m[3] : m[3]; return y + '-' + ('0' + m[2]).slice(-2) + '-' + ('0' + m[1]).slice(-2); }
+  if (/^\d{10,13}$/.test(s)) return Utilities.formatDate(new Date(Number(s) * (s.length === 10 ? 1000 : 1)), TZ, 'yyyy-MM-dd');
+  return '';
+}
+
+function asegurarHoja_(nombre) {
+  if (!ss_().getSheetByName(nombre)) {
+    crearHoja_(ss_(), nombre, COLUMNAS[nombre], []);
+    delete _hojas[nombre];
+  }
+}
+
+function apiImportarClientes_(d, ses) {
+  const filas = Array.isArray(d.filas) ? d.filas : [];
+  if (!filas.length) return { ok: false, error: 'El archivo no tiene filas' };
+  asegurarHoja_(HOJAS.CLIENTES);
+  const lock = LockService.getScriptLock(); lock.waitLock(30000);
+  try {
+    const mapa = {};
+    leer_(HOJAS.CLIENTES).forEach(function (c) { if (c.clave) mapa[c.clave] = c; });
+    let nuevos = 0, actualizados = 0, saltados = 0;
+    filas.forEach(function (x) {
+      const nombre = limpiar_(x.nombre, 80), apellidos = limpiar_(x.apellidos, 100);
+      const email = limpiar_(x.email, 120).toLowerCase(), telefono = limpiar_(x.telefono, 30);
+      const clave = claveCliente_(email, telefono, (nombre + ' ' + apellidos).trim());
+      if (!clave) { saltados++; return; }
+      const prev = mapa[clave];
+      const c = {
+        clave: clave, nombre: nombre || (prev && prev.nombre) || '', apellidos: apellidos || (prev && prev.apellidos) || '',
+        email: email || (prev && prev.email) || '', telefono: telefono || (prev && prev.telefono) || '',
+        primera: fechaFlexible_(x.primera) || (prev && prev.primera) || '',
+        ultima: fechaFlexible_(x.ultima) || (prev && prev.ultima) || '',
+        reservas: Number(x.reservas) || (prev && Number(prev.reservas)) || 0,
+        noVino: Number(x.noVino) || (prev && Number(prev.noVino)) || 0,
+        notas: limpiar_(x.notas, 1000) || (prev && prev.notas) || '', origen: 'vento'
+      };
+      if (prev) actualizados++; else nuevos++;
+      mapa[clave] = c;
+    });
+    const out = Object.keys(mapa).map(function (k) {
+      const c = mapa[k]; return COLUMNAS.CLIENTES.map(function (col) { return c[col] === undefined ? '' : c[col]; });
+    });
+    reescribir_(HOJAS.CLIENTES, COLUMNAS.CLIENTES, out);
+    auditar_('', 'Clientes importados', '', nuevos + ' nuevos, ' + actualizados + ' actualizados', 'panel (' + ses.rol + ')');
+    return { ok: true, nuevos: nuevos, actualizados: actualizados, saltados: saltados, total: out.length };
+  } finally { lock.releaseLock(); }
+}
+
+function apiImportarReservas_(d, ses) {
+  const filas = Array.isArray(d.filas) ? d.filas : [];
+  if (!filas.length) return { ok: false, error: 'El archivo no tiene filas' };
+  const lock = LockService.getScriptLock(); lock.waitLock(30000);
+  try {
+    const existentes = {};
+    leer_(HOJAS.RESERVAS).forEach(function (r) { existentes[r.id] = 1; });
+    const servs = servicios_(), hoy = hoy_(), ahora = ahoraTxt_();
+    const h = cabecera_(HOJAS.RESERVAS);
+    const nuevas = [];
+    let saltadas = 0, n = 0;
+    filas.forEach(function (x) {
+      const fecha = fechaFlexible_(x.fecha), hora = normHora_(x.hora);
+      if (!fecha || !hora) { saltadas++; return; }
+      const base = String(x.id || '').trim() || (fecha + hora + (x.email || x.telefono || x.nombre || ''));
+      const id = 'V' + base.replace(/[^A-Za-z0-9]/g, '').slice(0, 40);
+      if (existentes[id]) { saltadas++; return; }
+      const s = servicioDeHora_(servs, hora);
+      let estado = String(x.estado || '').trim();
+      const est = ESTADOS.filter(function (e) { return e.toLowerCase() === estado.toLowerCase(); })[0];
+      estado = est || (/cancel/i.test(estado) ? 'Cancelada' : /no.?pres|no.?show/i.test(estado) ? 'No presentado' : (fecha < hoy ? 'Finalizada' : 'Confirmada'));
+      const r = {
+        id: id, creada: ahora, actualizada: ahora, fecha: fecha, hora: hora, servicio: s ? s.servicio : '',
+        personas: Math.max(1, Number(x.personas) || 1), mesa: String(x.mesa || '').trim(),
+        nombre: limpiar_(x.nombre, 60), apellidos: limpiar_(x.apellidos, 80), email: limpiar_(x.email, 120).toLowerCase(),
+        telefono: limpiar_(x.telefono, 30), alergias: limpiar_(x.alergias, 500), notas: limpiar_(x.notas, 500),
+        estado: estado, origen: 'vento', codigo: codigo_(), recordatorio: fecha < hoy ? 'importada' : ''
+      };
+      nuevas.push(h.cab.map(function (k) { const v = r[k]; return v === undefined || v === null ? '' : String(v); }));
+      existentes[id] = 1; n++;
+    });
+    if (nuevas.length) {
+      invalidar_(HOJAS.RESERVAS);
+      h.sh.getRange(h.sh.getLastRow() + 1, 1, nuevas.length, h.cab.length).setNumberFormat('@').setValues(nuevas);
+    }
+    auditar_('', 'Reservas importadas', '', n + ' importadas', 'panel (' + ses.rol + ')');
+    return { ok: true, importadas: n, saltadas: saltadas };
+  } finally { lock.releaseLock(); }
 }
 
 /* ============================================================

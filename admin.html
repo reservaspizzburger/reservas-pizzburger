@@ -281,7 +281,9 @@
 
     <!-- CLIENTES -->
     <div id="v-clientes" class="vista oculto">
-      <div class="barra"><input class="crece" id="buscarCli" type="search" placeholder="Buscar por nombre, correo o teléfono…"></div>
+      <div class="barra"><input class="crece" id="buscarCli" type="search" placeholder="Buscar por nombre, correo o teléfono…">
+        <span id="totalCli" style="color:var(--suave);font-size:13px"></span>
+        <button class="btn sec peq solo-admin" id="btnImportar">Importar de Vento</button></div>
       <div class="seccion scroll"><table class="t"><thead><tr><th>Cliente</th><th>Contacto</th><th>Reservas</th><th>No vino</th><th>Última</th><th></th></tr></thead><tbody id="tClientes"></tbody></table></div>
     </div>
 
@@ -747,37 +749,147 @@ function pintarPlano(){
 
 /* ============ CLIENTES ============ */
 $('buscarCli').oninput = pintarClientes;
+// Une los clientes importados de Vento (hoja CLIENTES) con los que salen de las reservas
+const claveCli = (email, tel, nombre) => {
+  const e = String(email||'').trim().toLowerCase(); if (e) return e;
+  const t = String(tel||'').replace(/\D/g,'').replace(/^34(?=\d{9}$)/,''); if (t) return 'tel:'+t;
+  const n = String(nombre||'').trim().toLowerCase(); return n ? 'n:'+n : '';
+};
 function clientes(){
-  const mapa = {};
-  S.d.reservas.forEach(r => {
-    const k = (r.email || '').toLowerCase() || String(r.telefono||'').replace(/\D/g,'') || ('n:'+nombreCompleto(r).toLowerCase());
-    const c = mapa[k] = mapa[k] || { nombre:'', email:'', telefono:'', reservas:[], ultima:'' };
-    c.reservas.push(r);
-    if (r.fecha >= c.ultima){ c.ultima = r.fecha; c.nombre = nombreCompleto(r); c.email = r.email || c.email; c.telefono = r.telefono || c.telefono; }
+  const mapa = {}, porTel = {};
+  const nuevo = () => ({ nombre:'', email:'', telefono:'', reservas:[], ultima:'', primera:'', imp:null });
+  (S.d.clientes||[]).forEach(ci => {
+    const k = ci.clave || claveCli(ci.email, ci.telefono, ci.nombre+' '+ci.apellidos); if (!k) return;
+    const c = mapa[k] = mapa[k] || nuevo();
+    c.imp = ci; c.nombre = (ci.nombre+' '+(ci.apellidos||'')).trim(); c.email = ci.email; c.telefono = ci.telefono;
+    c.ultima = ci.ultima || ''; c.primera = ci.primera || '';
+    const t = String(ci.telefono||'').replace(/\D/g,'').replace(/^34(?=\d{9}$)/,''); if (t) porTel[t] = k;
   });
-  return Object.values(mapa).sort((a,b) => b.ultima.localeCompare(a.ultima));
+  S.d.reservas.forEach(r => {
+    let k = claveCli(r.email, r.telefono, nombreCompleto(r));
+    const t = String(r.telefono||'').replace(/\D/g,'').replace(/^34(?=\d{9}$)/,'');
+    if (!mapa[k] && t && porTel[t]) k = porTel[t]; // mismo teléfono que un cliente importado
+    if (!k) return;
+    const c = mapa[k] = mapa[k] || nuevo();
+    c.reservas.push(r);
+    if (r.fecha >= c.ultima){ c.ultima = r.fecha; const nn = nombreCompleto(r); if (nn.length >= c.nombre.length) c.nombre = nn; c.email = r.email || c.email; c.telefono = r.telefono || c.telefono; }
+    if (!c.primera || r.fecha < c.primera) c.primera = r.fecha;
+  });
+  return Object.values(mapa).map(c => {
+    // Reservas de Vento: el número importado + las de la app (sin contar dos veces las importadas)
+    const propias = c.reservas.filter(r => r.origen !== 'vento');
+    const deVento = c.reservas.filter(r => r.origen === 'vento');
+    const ok = l => l.filter(r => !['Cancelada','No presentado'].includes(r.estado)).length;
+    const nv = l => l.filter(r => r.estado === 'No presentado').length;
+    c.total = Math.max(c.imp ? c.imp.reservas : 0, ok(deVento)) + ok(propias);
+    c.noVino = Math.max(c.imp ? c.imp.noVino : 0, nv(deVento)) + nv(propias);
+    return c;
+  }).sort((a,b) => (b.ultima||'').localeCompare(a.ultima||''));
 }
 function pintarClientes(){
   const q = $('buscarCli').value.trim().toLowerCase();
-  const lista = clientes().filter(c => !q || [c.nombre,c.email,c.telefono].join(' ').toLowerCase().includes(q)).slice(0,300);
+  const todos = clientes();
+  const filtrados = todos.filter(c => !q || [c.nombre,c.email,c.telefono].join(' ').toLowerCase().includes(q));
+  const lista = filtrados.slice(0,300);
+  $('totalCli').textContent = filtrados.length+' clientes'+(filtrados.length>300?' (se muestran 300, usa el buscador)':'');
   $('tClientes').innerHTML = lista.length ? lista.map((c,i) => {
-    const ok = c.reservas.filter(r => !['Cancelada','No presentado'].includes(r.estado)).length;
-    const nv = c.reservas.filter(r => r.estado === 'No presentado').length;
+    const ok = c.total, nv = c.noVino;
     return '<tr><td><b>'+esc(c.nombre)+'</b></td><td>'+esc(c.telefono)+'<br><small style="color:var(--suave)">'+esc(c.email)+'</small></td><td>'+ok+'</td><td>'+(nv?'<span class="estado e-Cancelada">'+nv+'</span>':'0')+'</td><td>'+fechaCorta(c.ultima)+'</td>'+
       '<td style="text-align:right;white-space:nowrap"><button class="btn sec peq" data-hist="'+i+'">Historial</button> <button class="btn sec peq" data-nueva="'+i+'">Nueva reserva</button></td></tr>';
   }).join('') : '<tr><td colspan="6" class="vacio">Sin clientes.</td></tr>';
   $('tClientes').onclick = ev => {
     const b = ev.target.closest('button'); if (!b) return;
     const c = lista[Number(b.dataset.hist ?? b.dataset.nueva)];
-    if (b.dataset.nueva !== undefined){ const r = c.reservas[0]; return abrirReserva(null, { nombre:r.nombre, apellidos:r.apellidos, email:c.email, telefono:c.telefono, alergias:r.alergias }); }
+    if (b.dataset.nueva !== undefined){ const r = c.reservas[0] || {}; const ci = c.imp || {};
+      return abrirReserva(null, { nombre:r.nombre||ci.nombre||c.nombre, apellidos:r.apellidos||ci.apellidos||'', email:c.email, telefono:c.telefono, alergias:r.alergias||'' }); }
     $('dlgTitulo').textContent = c.nombre;
+    const ci = c.imp;
     $('dlgCuerpo').innerHTML = '<p style="margin-top:0">'+esc(c.telefono)+' · '+esc(c.email)+'</p>'+
+      '<div class="resumenes" style="grid-template-columns:repeat(3,1fr)"><div class="res"><b>'+c.total+'</b><span>Reservas</span></div><div class="res"><b>'+c.noVino+'</b><span>No vino</span></div>'+
+      '<div class="res"><b style="font-size:17px">'+(c.primera?fechaCorta(c.primera):'—')+'</b><span>Cliente desde</span></div></div>'+
+      (ci && ci.notas ? '<p class="hint" style="background:#f8fafb;border-radius:8px;padding:8px 10px">📝 '+esc(ci.notas)+'</p>' : '')+
+      (!c.reservas.length && ci ? '<p class="vacio">Historial de Vento: '+ci.reservas+' reservas, la última el '+fechaCorta(ci.ultima)+'. Importa también las reservas de Vento para ver el detalle de cada una.</p>' : '')+
       c.reservas.slice().sort((a,b)=>(b.fecha+b.hora).localeCompare(a.fecha+a.hora)).map(r =>
       '<div class="r" style="grid-template-columns:90px 1fr auto"><div>'+fechaCorta(r.fecha)+'<br><b>'+esc(r.hora)+'</b></div><div class="quien">'+r.personas+' pax · mesa '+esc(r.mesa||'—')+
       (r.alergias?'<span class="alerg">⚠ '+esc(r.alergias)+'</span>':'')+(r.notas?'<small>'+esc(r.notas)+'</small>':'')+'</div><div><span class="estado e-'+r.estado.replace(' ','-')+'">'+esc(r.estado)+'</span></div></div>').join('');
     $('dlg').showModal();
   };
 }
+
+/* ---------- Importar de Vento ---------- */
+function leerCsv(texto){
+  texto = texto.replace(/^\ufeff/, '');
+  const primera = texto.split(/\r?\n/)[0] || '';
+  const sep = [';', ',', '\t'].sort((a,b) => primera.split(b).length - primera.split(a).length)[0];
+  const filas = []; let fila = [], campo = '', comillas = false;
+  for (let i=0; i<texto.length; i++){
+    const ch = texto[i];
+    if (comillas){
+      if (ch === '"'){ if (texto[i+1] === '"'){ campo += '"'; i++; } else comillas = false; }
+      else campo += ch;
+    } else if (ch === '"') comillas = true;
+    else if (ch === sep){ fila.push(campo); campo = ''; }
+    else if (ch === '\n' || ch === '\r'){ if (ch === '\r' && texto[i+1] === '\n') i++; fila.push(campo); filas.push(fila); fila = []; campo = ''; }
+    else campo += ch;
+  }
+  if (campo || fila.length){ fila.push(campo); filas.push(fila); }
+  const cab = (filas.shift()||[]).map(h => h.trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[\s-]+/g,'_'));
+  return filas.filter(f => f.some(v => v.trim())).map(f => { const o = {}; cab.forEach((h,i) => o[h] = (f[i]||'').trim()); return o; });
+}
+const pick = (o, ...ks) => { for (const k of ks) if (o[k] !== undefined && o[k] !== '') return o[k]; return ''; };
+function mapearClientes(filas){
+  return filas.map(o => ({
+    nombre: pick(o,'nombre','name','first_name'), apellidos: pick(o,'apellidos','apellido','surname','last_name'),
+    email: pick(o,'email','correo','e_mail','mail'), telefono: pick(o,'telefono','tel','phone','movil','telefono_movil'),
+    primera: pick(o,'fecha_primera_reserva','primera_reserva','primera','first_visit','creado','created_at'),
+    ultima: pick(o,'fecha_ult_reserva','fecha_ultima_reserva','ultima_reserva','ultima','last_visit'),
+    reservas: pick(o,'num_reservas_ok','num_reservas','reservas','visitas','total_reservas'),
+    noVino: pick(o,'num_no_show','no_presentado','no_shows','num_no_presentado'),
+    notas: pick(o,'notas','observaciones','notes','comentarios')
+  }));
+}
+function mapearReservas(filas){
+  return filas.map(o => {
+    let fecha = pick(o,'fecha','date','dia'), hora = pick(o,'hora','time');
+    if (!hora && /\d{1,2}:\d{2}/.test(fecha)) hora = fecha.match(/\d{1,2}:\d{2}/)[0];
+    return { id: pick(o,'id','_id','reserva','codigo'), fecha, hora,
+      nombre: pick(o,'nombre','name','cliente'), apellidos: pick(o,'apellidos','apellido'),
+      email: pick(o,'email','correo'), telefono: pick(o,'telefono','tel','phone'),
+      personas: pick(o,'personas','pax','comensales','people'), mesa: pick(o,'mesa','table'),
+      estado: pick(o,'estado','status'), notas: pick(o,'notas','observaciones','notes'), alergias: pick(o,'alergias','allergies') };
+  });
+}
+$('btnImportar').onclick = () => {
+  $('dlgTitulo').textContent = 'Importar de Vento';
+  $('dlgCuerpo').innerHTML =
+    '<p style="margin-top:0">Exporta de Vento en <b>CSV</b> y elige aquí el archivo. Puedes repetirlo sin miedo: no se duplica nada.</p>'+
+    '<div class="seccion"><h2>1. Clientes</h2><p class="hint">Base <b>clientes_restaurante</b>: nombre, teléfono, correo, nº de reservas, primera y última visita, notas.</p>'+
+    '<input type="file" id="fCli" accept=".csv,text/csv"><p id="mCli" class="hint"></p></div>'+
+    '<div class="seccion"><h2>2. Reservas antiguas (opcional)</h2><p class="hint">Base <b>reservas_restaurante</b>: para ver el detalle de cada visita en el historial.</p>'+
+    '<input type="file" id="fRes" accept=".csv,text/csv"><p id="mRes" class="hint"></p></div>';
+  const subir = (input, msg, accion, mapear) => input.onchange = async () => {
+    const f = input.files[0]; if (!f) return;
+    msg.textContent = 'Leyendo archivo…';
+    try {
+      const filas = mapear(leerCsv(await f.text()));
+      if (!filas.length) throw new Error('No he encontrado filas en el archivo.');
+      msg.textContent = 'Subiendo '+filas.length+' filas… (puede tardar unos segundos)';
+      let total = { nuevos:0, actualizados:0, importadas:0, saltadas:0, saltados:0 };
+      for (let i=0; i<filas.length; i+=1500){ // por bloques, para archivos grandes
+        const r = await api(accion, { filas: filas.slice(i, i+1500) });
+        Object.keys(total).forEach(k => total[k] += r[k]||0);
+        msg.textContent = 'Subiendo… '+Math.min(i+1500, filas.length)+' de '+filas.length;
+      }
+      await cargar(); pintar();
+      msg.innerHTML = accion === 'importarClientes'
+        ? '✓ <b>'+total.nuevos+'</b> clientes nuevos, <b>'+total.actualizados+'</b> actualizados'+(total.saltados?' · '+total.saltados+' sin datos de contacto':'')+'.'
+        : '✓ <b>'+total.importadas+'</b> reservas importadas'+(total.saltadas?' · '+total.saltadas+' ya estaban o sin fecha/hora':'')+'.';
+    } catch(e){ msg.textContent = '✗ '+e.message; }
+  };
+  subir($('fCli'), $('mCli'), 'importarClientes', mapearClientes);
+  subir($('fRes'), $('mRes'), 'importarReservas', mapearReservas);
+  $('dlg').showModal();
+};
 
 /* ============ CALENDARIO ============ */
 $('anioAnt').onclick = () => { S.anio--; pintarCalendario(); };

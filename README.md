@@ -18,6 +18,7 @@ Se crean solas al ejecutar `instalar()`, ya rellenas con los datos exportados de
 - **MESAS**: `mesa, activa, capacidad, minimo, forma, x, y, zona, grupo, capacidadGrupo`. `grupo` = mesas que se pueden juntar (`06+07`); `capacidadGrupo` = plazas juntas (si se deja vacío, suma las de cada mesa).
 - **SERVICIOS**: `servicio, activo, dias, horas, duracion, capacidad`. `dias`: 0 = domingo … 6 = sábado. `horas`: horas fijas que se ofrecen en la web.
 - **APERTURAS**: días que se salen del horario normal (`fecha, comidas, cenas` con si/no). Una columna por servicio, con su nombre en minúsculas.
+- **CLIENTES**: clientes importados de Vento (nº de reservas, primera y última visita, notas). Se rellena desde el panel: Clientes → «Importar de Vento».
 - **CONFIG**: nombre, logo, textos de correo, textos legales, reglas de antelación, etc.
 - **AUDITORIA**: historial de cambios.
 
@@ -57,9 +58,13 @@ Los permisos se comprueban en el servidor; la sesión dura 6 h desde el último 
 
 **Correos**: confirmación, modificación (si cambia día, hora o personas y está marcado «Enviar correo al cliente»), cancelación (desde el enlace o desde el panel) y recordatorio unas 2 h antes (activador cada 15 min). Una cuenta Gmail normal tiene unos 100 correos al día.
 
-## Pasar las reservas que ya hay en Vento (opcional)
+## Pasar clientes y reservas de Vento
 
-Exporta de Vento la base `reservas_restaurante` a CSV. Pégala en una pestaña nueva llamada **IMPORTAR**, con las columnas `id, fecha (AAAA-MM-DD), hora, nombre, email, telefono, personas, mesa, estado, notas`. Después ejecuta `importarReservasVento()`. No duplica si se repite.
+Desde el panel, con el PIN de administración: **Clientes → Importar de Vento**.
+1. Exporta de Vento `clientes_restaurante` a CSV y elígelo en «1. Clientes».
+2. (Opcional) Exporta `reservas_restaurante` a CSV y elígelo en «2. Reservas antiguas», para ver el detalle de cada visita.
+
+Se puede repetir sin duplicar nada: los clientes se unen por correo, o por teléfono si no tienen correo. El nº de reservas que traía Vento se suma a las reservas nuevas de la app.
 
 ## Cosas a tener en cuenta
 

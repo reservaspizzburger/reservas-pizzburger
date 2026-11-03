@@ -36,7 +36,7 @@ const COLUMNAS = {
   APERTURAS: ['fecha', 'comidas', 'cenas'],
   CONFIG: ['clave', 'valor'],
   AUDITORIA: ['fecha', 'reserva', 'accion', 'antes', 'despues', 'origen'],
-  CLIENTES: ['clave', 'nombre', 'apellidos', 'email', 'telefono', 'primera', 'ultima', 'reservas', 'noVino', 'notas', 'origen']
+  CLIENTES: ['clave', 'nombre', 'apellidos', 'email', 'telefono', 'telefono2', 'primera', 'ultima', 'reservas', 'personas', 'noVino', 'suscrito', 'empresa', 'notas', 'origen']
 };
 
 const ESTADOS = ['Pendiente', 'Confirmada', 'Sentados', 'Finalizada', 'Cancelada', 'No presentado'];
@@ -434,7 +434,7 @@ function apiDatos_(d, ses) {
     if (ss_().getSheetByName(HOJAS.CLIENTES)) {
       clientes = leer_(HOJAS.CLIENTES).map(function (c) {
         const o = {}; COLUMNAS.CLIENTES.forEach(function (k) { o[k] = c[k] === undefined ? '' : c[k]; });
-        o.reservas = Number(o.reservas) || 0; o.noVino = Number(o.noVino) || 0; return o;
+        o.reservas = Number(o.reservas) || 0; o.noVino = Number(o.noVino) || 0; o.personas = Number(o.personas) || 0; return o;
       });
     }
   } catch (e) { console.error(e); }
@@ -1142,6 +1142,10 @@ function apiImportarClientes_(d, ses) {
       const c = {
         clave: clave, nombre: nombre || (prev && prev.nombre) || '', apellidos: apellidos || (prev && prev.apellidos) || '',
         email: email || (prev && prev.email) || '', telefono: telefono || (prev && prev.telefono) || '',
+        telefono2: limpiar_(x.telefono2, 30) || (prev && prev.telefono2) || '',
+        personas: Number(x.personas) || (prev && Number(prev.personas)) || 0,
+        suscrito: x.suscrito === undefined || x.suscrito === '' ? ((prev && prev.suscrito) || '') : (bool_(x.suscrito) ? 'si' : 'no'),
+        empresa: limpiar_(x.empresa, 100) || (prev && prev.empresa) || '',
         primera: fechaFlexible_(x.primera) || (prev && prev.primera) || '',
         ultima: fechaFlexible_(x.ultima) || (prev && prev.ultima) || '',
         reservas: Number(x.reservas) || (prev && Number(prev.reservas)) || 0,

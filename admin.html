@@ -807,6 +807,8 @@ function pintarClientes(){
     $('dlgCuerpo').innerHTML = '<p style="margin-top:0">'+esc(c.telefono)+' · '+esc(c.email)+'</p>'+
       '<div class="resumenes" style="grid-template-columns:repeat(3,1fr)"><div class="res"><b>'+c.total+'</b><span>Reservas</span></div><div class="res"><b>'+c.noVino+'</b><span>No vino</span></div>'+
       '<div class="res"><b style="font-size:17px">'+(c.primera?fechaCorta(c.primera):'—')+'</b><span>Cliente desde</span></div></div>'+
+      (ci ? '<p class="hint">'+[ci.personas ? ci.personas+' comensales en total' : '', ci.telefono2 ? 'Otro teléfono: '+esc(ci.telefono2) : '',
+        ci.suscrito === 'si' ? '✓ Acepta publicidad' : ci.suscrito === 'no' ? 'No acepta publicidad' : '', ci.empresa ? 'Empresa: '+esc(ci.empresa) : ''].filter(Boolean).join(' · ')+'</p>' : '')+
       (ci && ci.notas ? '<p class="hint" style="background:#f8fafb;border-radius:8px;padding:8px 10px">📝 '+esc(ci.notas)+'</p>' : '')+
       (!c.reservas.length && ci ? '<p class="vacio">Historial de Vento: '+ci.reservas+' reservas, la última el '+fechaCorta(ci.ultima)+'. Importa también las reservas de Vento para ver el detalle de cada una.</p>' : '')+
       c.reservas.slice().sort((a,b)=>(b.fecha+b.hora).localeCompare(a.fecha+a.hora)).map(r =>
@@ -837,16 +839,55 @@ function leerCsv(texto){
   return filas.filter(f => f.some(v => v.trim())).map(f => { const o = {}; cab.forEach((h,i) => o[h] = (f[i]||'').trim()); return o; });
 }
 const pick = (o, ...ks) => { for (const k of ks) if (o[k] !== undefined && o[k] !== '') return o[k]; return ''; };
+// Teléfono de Vento: tel_prefijo + tel_movil (o tel_fijo). Con +34 se guarda sin prefijo.
+function telVento(o, campo){
+  const n = String(pick(o, campo)||'').replace(/\D/g,''); if (!n) return '';
+  const pref = String(pick(o,'tel_prefijo','prefijo')||'').replace(/\D/g,'');
+  return pref && pref !== '34' ? '+'+pref+' '+n : n;
+}
+function fechaOrden(v){ // dd/mm/aaaa [hh:mm] -> aaaa-mm-dd para comparar
+  const m = String(v||'').match(/^(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{2,4})/);
+  if (m) return (m[3].length===2?'20'+m[3]:m[3])+'-'+pad(m[2])+'-'+pad(m[1]);
+  return String(v||'').slice(0,10);
+}
 function mapearClientes(filas){
-  return filas.map(o => ({
+  const lista = filas.map(o => {
+    const movil = telVento(o,'tel_movil') || telVento(o,'movil');
+    const fijo = telVento(o,'tel_fijo');
+    return {
     nombre: pick(o,'nombre','name','first_name'), apellidos: pick(o,'apellidos','apellido','surname','last_name'),
-    email: pick(o,'email','correo','e_mail','mail'), telefono: pick(o,'telefono','tel','phone','movil','telefono_movil'),
+    email: pick(o,'email','correo','e_mail','mail').toLowerCase(),
+    telefono: movil || fijo || pick(o,'telefono','tel','phone','telefono_movil'),
+    telefono2: movil && fijo && fijo !== movil ? fijo : '',
+    personas: pick(o,'num_personas','personas','comensales'),
+    suscrito: pick(o,'suscrito','newsletter','acepta_publicidad'),
+    empresa: pick(o,'nombre_empresa','empresa'),
     primera: pick(o,'fecha_primera_reserva','primera_reserva','primera','first_visit','creado','created_at'),
     ultima: pick(o,'fecha_ult_reserva','fecha_ultima_reserva','ultima_reserva','ultima','last_visit'),
     reservas: pick(o,'num_reservas_ok','num_reservas','reservas','visitas','total_reservas'),
     noVino: pick(o,'num_no_show','no_presentado','no_shows','num_no_presentado'),
-    notas: pick(o,'notas','observaciones','notes','comentarios')
-  }));
+    notas: [pick(o,'notas','observaciones','notes','comentarios'), pick(o,'camarero') ? 'Camarero: '+pick(o,'camarero') : ''].filter(Boolean).join(' · ')
+  }; });
+  // Une fichas repetidas del mismo archivo (mismo correo o teléfono): suma visitas y comensales
+  const unidas = {}, orden = [];
+  lista.forEach(c => {
+    const k = claveCli(c.email, c.telefono, c.nombre+' '+c.apellidos); if (!k){ orden.push(c); return; }
+    const u = unidas[k];
+    if (!u){ unidas[k] = c; orden.push(c); return; }
+    u.reservas = String((Number(u.reservas)||0) + (Number(c.reservas)||0));
+    u.personas = String((Number(u.personas)||0) + (Number(c.personas)||0));
+    if (c.primera && (!u.primera || fechaOrden(c.primera) < fechaOrden(u.primera))) u.primera = c.primera;
+    if (c.ultima && (!u.ultima || fechaOrden(c.ultima) > fechaOrden(u.ultima))) u.ultima = c.ultima;
+    ['nombre','apellidos','telefono','telefono2','empresa','notas'].forEach(f => { if (!u[f] && c[f]) u[f] = c[f]; });
+    if (/^s/i.test(c.suscrito)) u.suscrito = c.suscrito;
+  });
+  return orden;
+}
+// Lee el archivo en UTF-8 y, si las tildes no cuadran, como Windows/Latin-1 (lo que exporta Vento/Excel)
+async function textoArchivo(f){
+  const buf = await f.arrayBuffer();
+  try { return new TextDecoder('utf-8', { fatal:true }).decode(buf); }
+  catch(e){ return new TextDecoder('windows-1252').decode(buf); }
 }
 function mapearReservas(filas){
   return filas.map(o => {
@@ -871,7 +912,7 @@ $('btnImportar').onclick = () => {
     const f = input.files[0]; if (!f) return;
     msg.textContent = 'Leyendo archivo…';
     try {
-      const filas = mapear(leerCsv(await f.text()));
+      const filas = mapear(leerCsv(await textoArchivo(f)));
       if (!filas.length) throw new Error('No he encontrado filas en el archivo.');
       msg.textContent = 'Subiendo '+filas.length+' filas… (puede tardar unos segundos)';
       let total = { nuevos:0, actualizados:0, importadas:0, saltadas:0, saltados:0 };

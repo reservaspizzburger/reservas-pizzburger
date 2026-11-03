@@ -88,14 +88,18 @@
   .vacio{color:var(--suave);padding:20px 6px;text-align:center}
 
   /* Plano */
-  .plano{position:relative;width:100%;aspect-ratio:16/10;background:#f8fafb;border:1px dashed #d4dbe2;border-radius:12px;overflow:hidden}
+  .plano{position:relative;width:100%;max-width:760px;aspect-ratio:16/10;background:#f8fafb;border:1px dashed #d4dbe2;border-radius:12px;overflow:hidden}
   .plano-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch}
-  .plano-wrap .plano{min-width:680px}
-  .mesa{position:absolute;width:9.6%;min-width:70px;aspect-ratio:1/1;border:0;border-radius:10px;background:var(--libre);color:var(--libre-t);cursor:pointer;display:flex;flex-direction:column;align-items:center;justify-content:center;font-size:11.5px;line-height:1.2;box-shadow:0 2px 6px #17253514;padding:4px;overflow:hidden;text-align:center}
+  .plano-wrap .plano{min-width:620px}
+  .plano-wrap::after{content:'';display:block}
+  @media (max-width:700px){ .plano-wrap{margin:0 -4px} .desliza{display:block!important} }
+  .sinmesa{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;align-items:center;font-size:13px;color:var(--suave)}
+  .sinmesa button{border:1px solid #ecd09d;background:#fff8ea;color:#5b4210;border-radius:20px;padding:5px 11px;cursor:pointer;font-size:12.5px}
+  .mesa{position:absolute;width:9.6%;min-width:52px;aspect-ratio:1/1;border:0;border-radius:10px;background:var(--libre);color:var(--libre-t);cursor:pointer;display:flex;flex-direction:column;align-items:center;justify-content:center;font-size:10.5px;line-height:1.15;box-shadow:0 2px 6px #17253514;padding:3px;overflow:hidden;text-align:center}
   .mesa.redonda{border-radius:50%}
-  .mesa b{font-size:15px}
-  .mesa .rn{font-weight:700;font-size:12px;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-  .mesa .rd{font-size:11px;white-space:nowrap}
+  .mesa b{font-size:13px}
+  .mesa .rn{font-weight:700;font-size:11px;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .mesa .rd{font-size:10px;white-space:nowrap}
   .mesa .mas{font-size:10px;opacity:.8}
   /* Selector de fecha grande */
   .btn-fecha{border:1px solid #dce2e8;background:#fff;border-radius:6px;padding:8px 12px;cursor:pointer;font-weight:600;min-width:190px;text-align:left}
@@ -269,6 +273,8 @@
       </div>
       <div class="seccion">
         <div class="plano-wrap"><div class="plano" id="plano"></div></div>
+        <div class="desliza" style="display:none;font-size:12px;color:var(--suave);margin-top:6px">← Desliza el plano para ver todas las mesas →</div>
+        <div class="sinmesa" id="sinMesa"></div>
         <div class="leyenda"><span><i style="background:var(--libre)"></i>Libre</span><span><i style="background:var(--reservada)"></i>Reservada</span><span><i style="background:var(--sentada)"></i>Sentados</span><span><i style="background:#e4e7ea"></i>No activa</span></div>
       </div>
     </div>
@@ -693,6 +699,8 @@ $('pServicio').onchange = () => { $('pHora').value=''; pintarPlano(); };
 $('pHora').onchange = pintarPlano;
 // Escala X/Y para que ninguna mesa se salga del plano
 const posMesa = m => 'left:'+Math.min(90, Math.max(0,m.x))+'%;top:'+Math.min(83, Math.max(0,m.y))+'%';
+const normMesa = x => String(x==null?'':x).trim().replace(/^0+(?=\d)/,'');
+const mesasDe = r => String(r.mesa||'').split('+').map(normMesa).filter(Boolean);
 function etiquetaMesa(suyas){
   // Muestra la reserva que toca ahora: la sentada, o si no la siguiente en llegar
   const r = suyas.find(x => x.estado==='Sentados') || suyas[0];
@@ -712,14 +720,19 @@ function pintarPlano(){
   const dia = reservasDia(S.fecha).filter(r => ACTIVAS.includes(r.estado) && servicioDe(r) === s.servicio)
     .filter(r => !hSel || (minutos(r.hora) < minutos(hSel)+s.duracion && minutos(hSel) < minutos(r.hora)+s.duracion));
   $('plano').innerHTML = S.d.mesas.map(m => {
-    const suyas = dia.filter(r => String(r.mesa||'').split('+').includes(m.mesa));
+    const suyas = dia.filter(r => mesasDe(r).includes(normMesa(m.mesa)));
     const clase = !m.activa ? 'inactiva' : suyas.some(r=>r.estado==='Sentados') ? 'sentada' : suyas.length ? 'reservada' : '';
     return '<button class="mesa '+(m.forma==='redonda'?'redonda ':'')+clase+'" style="'+posMesa(m)+'" data-mesa="'+esc(m.mesa)+'">'+
       '<b>'+esc(m.mesa)+'</b>'+(suyas.length ? etiquetaMesa(suyas) : m.capacidad+' pl.')+'</button>';
   }).join('');
+  const existentes = S.d.mesas.map(m => normMesa(m.mesa));
+  const sin = dia.filter(r => !mesasDe(r).some(x => existentes.includes(x)));
+  $('sinMesa').innerHTML = sin.length ? '<b>Sin mesa asignada:</b>'+sin.map(r =>
+    '<button data-editar="'+r.id+'">'+esc(r.hora)+' · '+esc(r.nombre)+' · '+r.personas+' pax</button>').join('') : '';
+  $('sinMesa').onclick = ev => { const b = ev.target.closest('[data-editar]'); if (b) abrirReserva(S.d.reservas.find(r => r.id === b.dataset.editar)); };
   $('plano').onclick = ev => {
     const b = ev.target.closest('[data-mesa]'); if (!b) return;
-    const m = b.dataset.mesa; const suyas = dia.filter(r => String(r.mesa||'').split('+').includes(m));
+    const m = b.dataset.mesa; const suyas = dia.filter(r => mesasDe(r).includes(normMesa(m)));
     $('dlgTitulo').textContent = 'Mesa '+m+' · '+fechaLarga(S.fecha);
     $('dlgCuerpo').innerHTML = (suyas.length ? suyas.map(r =>
       '<div class="r" style="grid-template-columns:60px 1fr auto"><div class="hora">'+esc(r.hora)+'</div><div class="quien"><b>'+esc(nombreCompleto(r))+'</b><small>'+r.personas+' pax · '+esc(r.estado)+'</small></div>'+

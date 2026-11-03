@@ -22,7 +22,13 @@
   .login-caja{background:#fff;border-radius:13px;padding:28px 24px;width:100%;max-width:340px;box-shadow:0 10px 30px #17253514;text-align:center}
   .login-caja h1{font-size:22px;margin:4px 0 4px}
   .login-caja p{color:var(--suave);margin:0 0 18px;font-size:14px}
-  .login-caja input{width:100%;text-align:center;font-size:24px;letter-spacing:.3em;padding:12px;border:1px solid var(--borde);border-radius:9px}
+  .login-caja input[type=password]{width:100%;text-align:center;font-size:18px;padding:12px;border:1px solid var(--borde);border-radius:9px}
+  .quien{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px}
+  .quien label{cursor:pointer}
+  .quien input{position:absolute;opacity:0;pointer-events:none}
+  .quien span{display:block;border:1px solid var(--borde);border-radius:9px;padding:10px 6px;font-weight:600;font-size:14px;color:#5c6672}
+  .quien input:checked+span{background:var(--prim);border-color:var(--prim);color:#fff}
+  .quien input:focus-visible+span{outline:2px solid #698198;outline-offset:2px}
   .eyebrow{font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:#6d7785}
 
   /* Layout */
@@ -203,8 +209,12 @@
   <form class="login-caja" id="fLogin">
     <div class="eyebrow">Pizzburger · uso interno</div>
     <h1>Reservas</h1>
-    <p>Escribe tu PIN para entrar</p>
-    <input id="pin" type="password" inputmode="numeric" autocomplete="current-password" maxlength="12" aria-label="PIN">
+    <p>Elige quién eres y escribe la contraseña</p>
+    <div class="quien" role="radiogroup" aria-label="Acceso">
+      <label><input type="radio" name="quien" value="equipo" checked><span>Equipo</span></label>
+      <label><input type="radio" name="quien" value="admin"><span>Administración</span></label>
+    </div>
+    <input id="pin" type="password" autocomplete="current-password" maxlength="72" aria-label="Contraseña" placeholder="Contraseña">
     <button class="btn" style="width:100%;margin-top:12px;padding:11px">Entrar</button>
     <p id="loginMsg" style="color:#a45a5a;margin:12px 0 0;min-height:20px"></p>
   </form>
@@ -374,9 +384,9 @@
 <dialog id="dlg"><div class="dlg-cab"><h2 id="dlgTitulo"></h2><button class="cerrar" aria-label="Cerrar" onclick="cerrarDlg()">×</button></div><div class="dlg-cuerpo" id="dlgCuerpo"></div></dialog>
 <div id="aviso" class="oculto"></div>
 
+<script src="config.js"></script>
 <script>
-/* ===== Configuración: pega aquí la URL /exec de tu Apps Script ===== */
-const API_URL = 'https://script.google.com/macros/s/AKfycbw8woqhwYriUOv9VQidnCNPjEgAQuxXqQrCx56SiSeAVejDrOF3-Zi8Bj80D5HcEyXj/exec';
+const { SUPABASE_URL, SUPABASE_KEY, USUARIOS } = window.PZB_CONFIG;
 
 const $ = id => document.getElementById(id);
 const ESTADOS = ['Pendiente','Confirmada','Sentados','Finalizada','Cancelada','No presentado'];
@@ -396,21 +406,58 @@ const fechaCorta = s => { if(!s) return ''; const d = deIso(s.slice(0,10)); retu
 const esc = s => String(s==null?'':s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const minutos = h => { const p = String(h||'0:0').split(':').map(Number); return p[0]*60+(p[1]||0); };
 const nombreCompleto = r => (r.nombre+' '+(r.apellidos||'')).trim();
-function sesionGuardar(){ try{ sessionStorage.setItem('pzb_ses', JSON.stringify({token:S.token, rol:S.rol})); }catch(e){} }
-function sesionLeer(){ try{ return JSON.parse(sessionStorage.getItem('pzb_ses')||'null'); }catch(e){ return null; } }
-function sesionBorrar(){ try{ sessionStorage.removeItem('pzb_ses'); sessionStorage.removeItem('pzb_datos'); }catch(e){} }
+// Sesión de Supabase: se guarda en este navegador para no tener que entrar cada vez
+function sesionGuardar(){ try{ localStorage.setItem('pzb_auth', JSON.stringify(AUTH)); }catch(e){} }
+function sesionLeer(){ try{ return JSON.parse(localStorage.getItem('pzb_auth')||'null'); }catch(e){ return null; } }
+function sesionBorrar(){ try{ localStorage.removeItem('pzb_auth'); sessionStorage.removeItem('pzb_datos'); }catch(e){} }
+let AUTH = null; // { access_token, refresh_token, expires_at }
 function datosGuardar(r){ try{ sessionStorage.setItem('pzb_datos', JSON.stringify(r)); }catch(e){} }
 function datosLeer(){ try{ return JSON.parse(sessionStorage.getItem('pzb_datos')||'null'); }catch(e){ return null; } }
 
 let tAviso;
 function aviso(txt, error){ const a = $('aviso'); a.textContent = txt; a.className = error?'error':''; clearTimeout(tAviso); tAviso = setTimeout(()=>a.className='oculto', error?6000:3000); }
 
-async function api(accion, datos){
+async function pedir(ruta, cuerpo, token){
   let r;
-  try { r = await fetch(API_URL, { method:'POST', body: JSON.stringify(Object.assign({ accion, token:S.token }, datos||{})) }); }
-  catch(e){ throw new Error('Sin conexión con el servidor. Revisa internet e inténtalo de nuevo.'); }
-  const j = await r.json();
-  if (j.sesion === false){ salir(true); throw new Error(j.error); }
+  try {
+    r = await fetch(SUPABASE_URL + ruta, { method:'POST',
+      headers: Object.assign({ 'apikey': SUPABASE_KEY, 'Content-Type':'application/json' }, token ? { 'Authorization':'Bearer '+token } : {}),
+      body: JSON.stringify(cuerpo) });
+  } catch(e){ throw new Error('Sin conexión con el servidor. Revisa internet e inténtalo de nuevo.'); }
+  let j = {}; try { j = await r.json(); } catch(e){}
+  return { status: r.status, j };
+}
+function guardarAuth(j){
+  AUTH = { access_token: j.access_token, refresh_token: j.refresh_token, expires_at: Date.now() + (j.expires_in||3600)*1000 };
+  sesionGuardar();
+}
+let refrescando = null;
+async function tokenValido(){
+  if (!AUTH) return null;
+  if (Date.now() < AUTH.expires_at - 60000) return AUTH.access_token;
+  refrescando = refrescando || pedir('/auth/v1/token?grant_type=refresh_token', { refresh_token: AUTH.refresh_token })
+    .then(({ status, j }) => { if (status === 200 && j.access_token){ guardarAuth(j); return AUTH.access_token; } AUTH = null; sesionBorrar(); return null; })
+    .finally(() => { refrescando = null; });
+  return refrescando;
+}
+async function api(accion, datos){
+  if (accion === 'login'){
+    const { status, j } = await pedir('/auth/v1/token?grant_type=password', { email: USUARIOS[datos.quien], password: datos.clave });
+    if (status !== 200 || !j.access_token) throw new Error(status === 400 ? 'Contraseña incorrecta' : (j.msg || j.error_description || 'No se pudo entrar'));
+    guardarAuth(j);
+    const yo = await api('yo');
+    return { ok:true, token: AUTH.access_token, rol: yo.rol };
+  }
+  if (accion === 'salir'){
+    const t = AUTH && AUTH.access_token; AUTH = null; sesionBorrar();
+    if (t) pedir('/auth/v1/logout', {}, t).catch(()=>{});
+    return { ok:true };
+  }
+  const token = await tokenValido();
+  if (!token){ salir(true); throw new Error('La sesión ha caducado. Vuelve a entrar.'); }
+  const { status, j } = await pedir('/rest/v1/rpc/panel', { p: Object.assign({ accion }, datos||{}) }, token);
+  if (status === 401 || j.sesion === false){ salir(true); throw new Error(j.error || 'La sesión ha caducado. Vuelve a entrar.'); }
+  if (status >= 400) throw new Error(j.message || 'Error del servidor');
   if (!j.ok){ const e = new Error(j.error || 'Error'); e.datos = j; throw e; }
   return j;
 }
@@ -420,7 +467,8 @@ $('fLogin').addEventListener('submit', async ev => {
   ev.preventDefault();
   $('loginMsg').textContent = '';
   try {
-    const r = await api('login', { pin: $('pin').value });
+    const quien = document.querySelector('[name=quien]:checked').value;
+    const r = await api('login', { quien, clave: $('pin').value });
     S.token = r.token; S.rol = r.rol; sesionGuardar();
     $('pin').value = '';
     await entrar();
@@ -441,14 +489,15 @@ function mostrarApp(){
   ir(S.vista);
 }
 function salir(caducada){
-  if (!caducada && S.token) api('salir').catch(()=>{});
-  S.token=''; S.rol=''; sesionBorrar();
+  if (!caducada) api('salir').catch(()=>{});
+  else { AUTH = null; sesionBorrar(); }
+  S.token=''; S.rol='';
   $('app').classList.add('oculto'); $('login').classList.remove('oculto');
   $('loginMsg').textContent = caducada ? 'La sesión ha caducado. Vuelve a entrar.' : '';
   $('pin').focus();
 }
 $('btnSalir').onclick = () => salir();
-$('btnAdmin').onclick = () => salir();
+$('btnAdmin').onclick = () => { salir(); const a = document.querySelector('[name=quien][value=admin]'); if (a) a.checked = true; $('pin').focus(); };
 
 /* ---------- Datos ---------- */
 async function cargar(silencioso){
@@ -1072,9 +1121,9 @@ async function cargarHistorial(){
 
 /* ---------- Inicio ---------- */
 (function(){
-  const s = sesionLeer();
-  if (s && s.token){
-    S.token = s.token; S.rol = s.rol;
+  AUTH = sesionLeer();
+  if (AUTH && AUTH.refresh_token){
+    S.token = 'ok';
     const guardados = datosLeer();
     if (guardados){ // abre al instante con lo último que había y actualiza por detrás
       aplicarDatos(guardados); mostrarApp();

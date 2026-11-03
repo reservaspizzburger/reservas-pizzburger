@@ -3,7 +3,7 @@
 -- ============================================================
 --  Este archivo se aplica SOLO desde GitHub (Actions → "Supabase")
 --  cada vez que cambia. Se puede ejecutar las veces que haga falta:
---  no borra datos ni duplica nada. (v1)
+--  no borra datos ni duplica nada. (v2)
 --
 --  Todo vive en el esquema privado "pzb" (no accesible desde fuera).
 --  La web y el panel solo pueden llamar a dos funciones:

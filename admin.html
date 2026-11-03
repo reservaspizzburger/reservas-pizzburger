@@ -333,7 +333,6 @@
           <div class="campo"><label>Teléfono</label><input data-cfg="telefono"></div>
           <div class="campo"><label>Dirección</label><input data-cfg="direccion"></div>
           <div class="campo ancho"><label>Logo (dirección https://…)</label><input data-cfg="logo" placeholder="https://"></div>
-          <div class="campo ancho"><label>Dirección de la página pública de reservas (para el enlace de cancelar del correo)</label><input data-cfg="urlPublica" placeholder="https://…/reservas-pizzburger.html"></div>
         </div>
       </div>
       <div class="seccion">
@@ -345,23 +344,13 @@
         </div>
       </div>
       <div class="seccion">
-        <h2>Correos</h2>
-        <div class="campos">
-          <div class="campo"><label>Correo del restaurante (recibe avisos)</label><input type="email" data-cfg="emailRestaurante"></div>
-          <div class="campo"><label>Avisar al restaurante de reservas y cancelaciones web</label><select data-cfg="avisarRestaurante"><option value="si">Sí</option><option value="no">No</option></select></div>
-          <div class="campo ancho"><label>Asunto de confirmación</label><input data-cfg="asuntoConfirmacion"></div>
-          <div class="campo ancho"><label>Texto de confirmación</label><input data-cfg="textoConfirmacion"></div>
-          <div class="campo ancho"><label>Texto del recordatorio (se envía unas 2 horas antes)</label><input data-cfg="textoRecordatorio"></div>
-        </div>
-      </div>
-      <div class="seccion">
         <h2>Textos legales</h2>
         <div class="campos">
           <div class="campo ancho"><label>Condiciones de uso</label><textarea data-cfg="condiciones"></textarea></div>
           <div class="campo ancho"><label>Política de privacidad</label><textarea data-cfg="privacidad"></textarea></div>
         </div>
       </div>
-      <div class="fila-botones"><button class="btn sec" id="correoPrueba">Enviar correo de prueba</button><button class="btn" id="guardarCfg">Guardar personalización</button></div>
+      <div class="fila-botones"><button class="btn" id="guardarCfg">Guardar personalización</button></div>
     </div>
 
     <!-- ESTADÍSTICAS -->
@@ -537,7 +526,7 @@ function actualizarLocal(r){ const i = S.d.reservas.findIndex(x => x.id === r.id
 const TITULOS = { reservas:['Reservas','Todo lo que necesitas para organizar el servicio.'], plano:['Plano','Qué mesas están libres, reservadas u ocupadas.'],
   clientes:['Clientes','Historial de cada cliente según sus reservas.'], calendario:['Aperturas y cierres','Toca un día para abrir o cerrar un servicio solo ese día.'],
   servicios:['Servicios y horas','Días que abre cada servicio y horas que se ofrecen en la web.'], mesas:['Mesas','Plazas, mínimos, uniones y posición en el plano.'],
-  personalizacion:['Personalización','Nombre, logo, textos de los correos y textos legales.'], estadisticas:['Estadísticas','Reservas confirmadas, comensales y tendencias.'],
+  personalizacion:['Personalización','Nombre, teléfono, logo, reglas de la web y textos legales.'], estadisticas:['Estadísticas','Reservas confirmadas, comensales y tendencias.'],
   historial:['Historial de cambios','Quién cambió qué y cuándo.'] };
 document.querySelectorAll('.nav').forEach(b => b.onclick = () => ir(b.dataset.vista));
 function ir(v){
@@ -614,13 +603,12 @@ $('lista').addEventListener('click', async ev => {
   if (b.dataset.acc) cambiarEstado(b.dataset.id, b.dataset.acc, b);
 });
 // Cambia en pantalla al momento y guarda por detrás; si el servidor falla, lo deshace.
-async function cambiarEstado(id, estado, boton, avisar){
+async function cambiarEstado(id, estado, boton){
   const r0 = S.d.reservas.find(x => x.id === id); if (!r0) return;
   const antes = r0.estado;
   actualizarLocal(Object.assign({}, r0, { estado })); pintar();
   aviso('Marcada como '+estado.toLowerCase());
-  try { const r = await api('cambiarEstado', { id, estado, avisar:!!avisar }); actualizarLocal(r.reserva);
-    if (estado === 'Cancelada' && r.correo) aviso('Cancelada y avisado el cliente');
+  try { const r = await api('cambiarEstado', { id, estado }); actualizarLocal(r.reserva);
     if (!$('dlg').open) pintar();
   } catch(e){
     const r1 = S.d.reservas.find(x => x.id === id); if (r1) actualizarLocal(Object.assign({}, r1, { estado:antes }));
@@ -696,11 +684,10 @@ function abrirReserva(r, pre){
     '<div class="campo"><label>Nombre *</label><input name="nombre" required maxlength="60" value="'+esc(r.nombre)+'"></div>'+
     '<div class="campo"><label>Apellidos</label><input name="apellidos" maxlength="80" value="'+esc(r.apellidos)+'"></div>'+
     '<div class="campo"><label>Teléfono</label><input name="telefono" type="tel" maxlength="30" value="'+esc(r.telefono)+'"></div>'+
-    '<div class="campo"><label>Correo</label><input name="email" type="email" maxlength="120" value="'+esc(r.email)+'"></div>'+
-    '<div class="campo ancho"><label>Alergias (las ve el cliente en su correo)</label><input name="alergias" maxlength="500" value="'+esc(r.alergias)+'"></div>'+
+    '<div class="campo"><label>Correo (opcional, solo para la ficha)</label><input name="email" type="email" maxlength="120" value="'+esc(r.email)+'"></div>'+
+    '<div class="campo ancho"><label>Alergias</label><input name="alergias" maxlength="500" value="'+esc(r.alergias)+'"></div>'+
     '<div class="campo ancho"><label>Notas internas</label><input name="notas" maxlength="500" value="'+esc(r.notas)+'"></div>'+
     '<div class="campo"><label>Estado</label><select name="estado">'+ESTADOS.map(e=>'<option'+(e===r.estado?' selected':'')+'>'+e+'</option>').join('')+'</select></div>'+
-    '<div class="campo" style="align-self:end"><label class="check"><input type="checkbox" name="enviarCorreo" '+(nueva?'checked':'')+'> Enviar correo al cliente</label></div>'+
     '</div><p id="sugerencia" class="hint" style="color:var(--suave);font-size:13px;margin:10px 0 0"></p>'+
     '<div class="fila-botones">'+(nueva?'':'<button type="button" class="btn peligro" id="btnAnular">Cancelar reserva</button>')+
     '<button type="button" class="btn sec" onclick="cerrarDlg()">Cerrar</button><button class="btn" id="btnGuardarRes">Guardar</button></div></form>';
@@ -718,26 +705,25 @@ function abrirReserva(r, pre){
     const datos = { id:r.id, fecha:f.fecha.value, hora:f.hora.value, personas:Number(f.personas.value), mesa:f.mesa.value,
       nombre:f.nombre.value, apellidos:f.apellidos.value, telefono:f.telefono.value, email:f.email.value,
       alergias:f.alergias.value, notas:f.notas.value, estado:f.estado.value };
-    await guardarReserva(datos, f.enviarCorreo.checked, false);
+    await guardarReserva(datos, false);
   });
-  if (!nueva) $('btnAnular').onclick = async () => {
-    const avisar = r.email ? confirm('¿Cancelar la reserva y avisar al cliente por correo?\n\nAceptar = cancelar y avisar · Cancelar = no hacer nada') : confirm('¿Cancelar esta reserva?');
-    if (!avisar) return;
-    cerrarDlg(); cambiarEstado(r.id, 'Cancelada', null, !!r.email);
+  if (!nueva) $('btnAnular').onclick = () => {
+    if (!confirm('¿Cancelar esta reserva?')) return;
+    cerrarDlg(); cambiarEstado(r.id, 'Cancelada', null);
   };
   $('dlg').showModal();
   if (nueva) f.hora.focus();
 }
-async function guardarReserva(datos, enviarCorreo, forzar){
+async function guardarReserva(datos, forzar){
   const b = $('btnGuardarRes'); b.disabled = true;
   try {
-    const r = await api('guardarReserva', { reserva:datos, enviarCorreo, forzar });
+    const r = await api('guardarReserva', { reserva:datos, forzar });
     actualizarLocal(r.reserva); cerrarDlg();
     S.fecha = r.reserva.fecha; pintar();
-    aviso((r.avisos && r.avisos[0]) || ('Guardada'+(r.reserva.mesa?' · mesa '+r.reserva.mesa:'')+(r.correo?' · correo enviado':'')));
+    aviso((r.avisos && r.avisos[0]) || ('Guardada'+(r.reserva.mesa?' · mesa '+r.reserva.mesa:'')));
   } catch(e){
     b.disabled = false;
-    if (e.datos && e.datos.conflicto){ if (confirm(e.message+'\n\n¿Guardar igualmente?')) return guardarReserva(datos, enviarCorreo, true); }
+    if (e.datos && e.datos.conflicto){ if (confirm(e.message+'\n\n¿Guardar igualmente?')) return guardarReserva(datos, true); }
     else aviso(e.message, true);
   }
 }
@@ -1080,7 +1066,6 @@ $('guardarCfg').onclick = async () => {
   const config = {}; document.querySelectorAll('[data-cfg]').forEach(el => config[el.dataset.cfg] = el.value.trim());
   try { const r = await api('guardarConfig', { config }); S.d.config = r.config; aviso('Personalización guardada'); } catch(e){ aviso(e.message, true); }
 };
-$('correoPrueba').onclick = async () => { try { const r = await api('correoPrueba'); aviso('Correo de prueba enviado a '+r.email); } catch(e){ aviso(e.message, true); } };
 
 /* ============ ESTADÍSTICAS ============ */
 $('eActualizar').onclick = pintarEstadisticas;

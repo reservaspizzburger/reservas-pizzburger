@@ -135,9 +135,9 @@
   <div class="botones"><button class="btn" id="legalCerrar">Cerrar</button></div>
 </dialog>
 
+<script src="config.js"></script>
 <script>
-/* ===== Configuración: pega aquí la URL /exec de tu Apps Script ===== */
-const API_URL = 'https://script.google.com/macros/s/AKfycbw8woqhwYriUOv9VQidnCNPjEgAQuxXqQrCx56SiSeAVejDrOF3-Zi8Bj80D5HcEyXj/exec';
+const { SUPABASE_URL, SUPABASE_KEY } = window.PZB_CONFIG;
 
 const $ = id => document.getElementById(id);
 const DIAS = ['L','M','X','J','V','S','D'];
@@ -146,8 +146,11 @@ const DIAS_LARGO = ['domingo','lunes','martes','miércoles','jueves','viernes','
 const est = { info:null, fecha:'', personas:0, slot:null, mesVista:null, peticion:0, enviando:false };
 
 async function api(accion, datos){
-  const r = await fetch(API_URL, { method:'POST', body: JSON.stringify(Object.assign({accion}, datos||{})) });
+  const r = await fetch(SUPABASE_URL + '/rest/v1/rpc/publico', {
+    method:'POST', headers:{ 'apikey': SUPABASE_KEY, 'Content-Type':'application/json' },
+    body: JSON.stringify({ p: Object.assign({ accion }, datos||{}) }) });
   const j = await r.json();
+  if (!r.ok) throw new Error(j.message || 'Error del servidor');
   if (!j.ok) throw new Error(j.error || 'Error');
   return j;
 }

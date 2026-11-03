@@ -1,0 +1,359 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Reserva tu mesa · Pizzburger</title>
+<style>
+  :root{--fondo:#f4f4f2;--texto:#292929;--suave:#777;--borde:#ddd;--campo:#d5d5d5;--activo:#292929;--sel:#555}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--fondo);color:var(--texto);font:16px/1.45 Arial,Helvetica,sans-serif;-webkit-text-size-adjust:100%}
+  .wrap{max-width:560px;margin:0 auto;padding:28px 16px 40px}
+  .card{background:#fff;border-radius:12px;box-shadow:0 8px 24px #0000000d;padding:26px 24px}
+  .marca{display:flex;align-items:center;gap:12px;margin-bottom:6px}
+  .marca img{max-height:44px;max-width:120px}
+  .marca span{font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:var(--suave)}
+  h1{font-size:27px;font-weight:600;margin:4px 0 2px}
+  .sub{color:var(--suave);margin:0 0 18px}
+  .pasos{display:flex;gap:6px;margin:0 0 22px}
+  .pasos i{flex:1;height:4px;border-radius:4px;background:#d8d8d6}
+  .pasos i.on{background:var(--sel)}
+  h2{font-size:17px;margin:0 0 12px}
+  .mes{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px}
+  .mes b{text-transform:capitalize}
+  .flecha{border:1px solid var(--borde);background:#fff;border-radius:7px;width:38px;height:34px;font-size:18px;cursor:pointer;color:var(--texto)}
+  .flecha:disabled{opacity:.3;cursor:default}
+  .cal{display:grid;grid-template-columns:repeat(7,1fr);gap:5px}
+  .cal .dn{font-size:11px;text-align:center;color:var(--suave);text-transform:uppercase;padding:2px 0}
+  .dia{aspect-ratio:1/1;border:1px solid var(--borde);background:#fff;border-radius:7px;font-size:15px;cursor:pointer;color:var(--texto);font-family:inherit}
+  .dia:disabled{background:#e5e5e5;border-color:#e5e5e5;color:#999;cursor:default}
+  .dia.hoy{font-weight:700}
+  .dia.sel,.op.sel{background:var(--activo);border-color:var(--activo);color:#fff}
+  .ops{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
+  .op{border:1px solid var(--borde);background:#fff;border-radius:7px;padding:12px 6px;font-size:16px;cursor:pointer;color:var(--texto);font-family:inherit}
+  .op:hover,.dia:not(:disabled):hover{border-color:var(--sel)}
+  .grupo{font-size:13px;color:var(--suave);text-transform:uppercase;letter-spacing:.08em;margin:14px 0 8px}
+  .nota{font-size:14px;color:var(--suave);margin-top:12px}
+  .resumen{background:#f7f7f5;border-radius:9px;padding:12px 14px;margin-bottom:16px;font-size:15px}
+  .resumen b{display:block;font-size:16px;margin-bottom:2px}
+  label{display:block;font-size:14px;margin:12px 0 5px;color:#555}
+  input,textarea{width:100%;border:1px solid var(--campo);border-radius:7px;padding:11px 12px;font:inherit;color:var(--texto);background:#fff}
+  input:focus,textarea:focus{outline:2px solid #29292933;border-color:var(--sel)}
+  textarea{min-height:70px;resize:vertical}
+  .dos{display:grid;grid-template-columns:1fr 1fr;gap:0 12px}
+  .legal{font-size:13px;color:var(--suave);margin:14px 0 0}
+  .legal a{color:#000}
+  .botones{display:flex;gap:10px;margin-top:20px}
+  .btn{flex:1;border:0;border-radius:7px;padding:13px 16px;font:600 16px Arial,sans-serif;cursor:pointer;background:var(--activo);color:#fff}
+  .btn.sec{background:#eee;color:#555;flex:0 0 auto}
+  .btn:disabled{opacity:.55;cursor:default}
+  .msg{margin-top:14px;padding:10px 12px;border-radius:7px;font-size:14px;display:none}
+  .msg.error{display:block;background:#fbecec;color:#a45a5a}
+  .msg.info{display:block;background:#f1f1ef;color:#555}
+  .ok-icono{width:54px;height:54px;border-radius:50%;background:#eaf3eb;color:#397047;display:grid;place-items:center;font-size:28px;margin:4px 0 12px}
+  .oculto{display:none!important}
+  .trampa{position:absolute;left:-5000px;width:1px;height:1px;overflow:hidden}
+  dialog{border:0;border-radius:12px;max-width:560px;width:calc(100% - 32px);padding:22px;box-shadow:0 20px 50px #0003}
+  dialog::backdrop{background:#0006}
+  dialog .texto{white-space:pre-wrap;max-height:60vh;overflow:auto;font-size:14px;color:#444}
+  .cargando{color:var(--suave);font-size:15px;padding:18px 0}
+  @media (max-width:680px){h1{font-size:24px}.ops{grid-template-columns:repeat(3,1fr)}}
+  @media (max-width:400px){h1{font-size:22px}.ops{grid-template-columns:repeat(2,1fr)}.card{padding:22px 16px;border-radius:10px}.dos{grid-template-columns:1fr}input,textarea{font-size:16px}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="card" id="app">
+    <div class="marca"><img id="logo" class="oculto" alt=""><span id="marca">Pizzburger</span></div>
+
+    <!-- RESERVA -->
+    <div id="vReserva">
+      <h1>Reserva tu mesa</h1>
+      <p class="sub" id="subtitulo">Elige cuándo quieres venir</p>
+      <div class="pasos" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
+
+      <section id="p1">
+        <h2>Selecciona una fecha</h2>
+        <div class="mes"><button class="flecha" id="mesAnt" aria-label="Mes anterior">‹</button><b id="mesTxt"></b><button class="flecha" id="mesSig" aria-label="Mes siguiente">›</button></div>
+        <div class="cal" id="cal"><div class="cargando" style="grid-column:1/-1">Cargando…</div></div>
+      </section>
+
+      <section id="p2" class="oculto">
+        <h2>¿Cuántas personas?</h2>
+        <div class="ops" id="personas"></div>
+        <p class="nota" id="notaGrupo"></p>
+        <div class="botones"><button class="btn sec" data-atras="1">Atrás</button></div>
+      </section>
+
+      <section id="p3" class="oculto">
+        <h2>Elige una hora</h2>
+        <div id="horas"></div>
+        <div class="botones"><button class="btn sec" data-atras="2">Atrás</button></div>
+      </section>
+
+      <section id="p4" class="oculto">
+        <h2>Detalles de la reserva</h2>
+        <div class="resumen" id="resumen"></div>
+        <form id="form" novalidate>
+          <div class="dos">
+            <div><label for="nombre">Nombre *</label><input id="nombre" autocomplete="given-name" maxlength="60" required></div>
+            <div><label for="apellidos">Apellidos *</label><input id="apellidos" autocomplete="family-name" maxlength="80" required></div>
+          </div>
+          <label for="email">Correo electrónico *</label><input id="email" type="email" autocomplete="email" maxlength="120" required>
+          <label for="telefono">Teléfono *</label><input id="telefono" type="tel" autocomplete="tel" maxlength="30" required>
+          <label for="alergias">Alergias o necesidades especiales</label><textarea id="alergias" maxlength="500"></textarea>
+          <div class="trampa" aria-hidden="true"><label>Web<input id="web" tabindex="-1" autocomplete="off"></label></div>
+          <p class="legal">Al confirmar aceptas las <a href="#condiciones" data-legal="condiciones">condiciones de uso</a> y la <a href="#privacidad" data-legal="privacidad">política de privacidad</a>.</p>
+          <div class="botones"><button type="button" class="btn sec" data-atras="3">Atrás</button><button class="btn" id="confirmar">Confirmar reserva</button></div>
+        </form>
+      </section>
+      <div class="msg" id="msg" role="status"></div>
+    </div>
+
+    <!-- HECHO -->
+    <div id="vHecho" class="oculto">
+      <div class="ok-icono">✓</div>
+      <h1>Reserva confirmada</h1>
+      <p class="sub">¡Te esperamos!</p>
+      <div class="resumen" id="resumenFinal"></div>
+      <p class="nota" id="notaCorreo"></p>
+      <div class="botones"><button class="btn sec" id="otra">Hacer otra reserva</button></div>
+    </div>
+
+    <!-- CANCELAR -->
+    <div id="vCancelar" class="oculto">
+      <h1>Tu reserva</h1>
+      <div id="cancelCuerpo" class="cargando">Cargando…</div>
+      <div class="msg" id="msgCancel"></div>
+    </div>
+  </div>
+</div>
+
+<dialog id="legalDialog">
+  <h2 id="legalTitulo"></h2>
+  <div class="texto" id="legalTexto"></div>
+  <div class="botones"><button class="btn" id="legalCerrar">Cerrar</button></div>
+</dialog>
+
+<script>
+/* ===== Configuración: pega aquí la URL /exec de tu Apps Script ===== */
+const API_URL = 'https://script.google.com/macros/s/AKfycbw8woqhwYriUOv9VQidnCNPjEgAQuxXqQrCx56SiSeAVejDrOF3-Zi8Bj80D5HcEyXj/exec';
+
+const $ = id => document.getElementById(id);
+const DIAS = ['L','M','X','J','V','S','D'];
+const MESES = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
+const DIAS_LARGO = ['domingo','lunes','martes','miércoles','jueves','viernes','sábado'];
+const est = { info:null, fecha:'', personas:0, slot:null, mesVista:null, peticion:0, enviando:false };
+
+async function api(accion, datos){
+  const r = await fetch(API_URL, { method:'POST', body: JSON.stringify(Object.assign({accion}, datos||{})) });
+  const j = await r.json();
+  if (!j.ok) throw new Error(j.error || 'Error');
+  return j;
+}
+const pad = n => String(n).padStart(2,'0');
+const iso = d => d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate());
+const deIso = s => { const p = s.split('-').map(Number); return new Date(p[0], p[1]-1, p[2]); };
+const fechaLarga = s => { const d = deIso(s); return DIAS_LARGO[d.getDay()]+' '+d.getDate()+' de '+MESES[d.getMonth()]; };
+const esc = s => String(s==null?'':s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+function mensaje(el, tipo, txt){ el.className = 'msg '+(txt?tipo:''); el.textContent = txt||''; }
+function guardarLocal(k,v){ try{ localStorage.setItem(k, JSON.stringify(v)); }catch(e){} }
+function leerLocal(k){ try{ return JSON.parse(localStorage.getItem(k)||'null'); }catch(e){ return null; } }
+
+/* ---------- Pasos ---------- */
+function paso(n){
+  [1,2,3,4].forEach(i => $('p'+i).classList.toggle('oculto', i!==n));
+  document.querySelectorAll('.pasos i').forEach((el,i) => el.classList.toggle('on', i < n));
+  mensaje($('msg'), '', '');
+}
+document.querySelectorAll('[data-atras]').forEach(b => b.addEventListener('click', () => paso(Number(b.dataset.atras))));
+
+/* ---------- Calendario ---------- */
+function abierto(fecha){
+  const info = est.info, ov = info.aperturas[fecha], dow = deIso(fecha).getDay();
+  return info.servicios.some(s => {
+    const k = s.servicio.toLowerCase();
+    if (ov && ov[k] !== undefined) return ov[k];
+    return s.activo && s.dias.includes(dow);
+  });
+}
+function limites(){
+  const hoy = deIso(est.info.hoy);
+  const max = new Date(hoy); max.setDate(max.getDate() + est.info.config.diasAntelacion);
+  return { hoy, max };
+}
+function pintarCalendario(){
+  const { hoy, max } = limites();
+  const v = est.mesVista;
+  $('mesTxt').textContent = MESES[v.getMonth()]+' '+v.getFullYear();
+  $('mesAnt').disabled = v <= new Date(hoy.getFullYear(), hoy.getMonth(), 1);
+  $('mesSig').disabled = new Date(v.getFullYear(), v.getMonth()+1, 1) > max;
+  const cal = $('cal'); cal.innerHTML = DIAS.map(d => '<div class="dn">'+d+'</div>').join('');
+  const primero = new Date(v.getFullYear(), v.getMonth(), 1);
+  const hueco = (primero.getDay()+6)%7;
+  for (let i=0;i<hueco;i++) cal.insertAdjacentHTML('beforeend','<div></div>');
+  const ultimo = new Date(v.getFullYear(), v.getMonth()+1, 0).getDate();
+  for (let d=1; d<=ultimo; d++){
+    const f = new Date(v.getFullYear(), v.getMonth(), d), s = iso(f);
+    const ok = f >= hoy && f <= max && abierto(s);
+    const b = document.createElement('button');
+    b.className = 'dia'+(s===est.info.hoy?' hoy':'')+(s===est.fecha?' sel':'');
+    b.textContent = d; b.disabled = !ok;
+    b.setAttribute('aria-label', fechaLarga(s)+(ok?'':' (cerrado)'));
+    b.onclick = () => { est.fecha = s; precargar(s); pintarPersonas(); paso(2); };
+    cal.appendChild(b);
+  }
+}
+$('mesAnt').onclick = () => { est.mesVista = new Date(est.mesVista.getFullYear(), est.mesVista.getMonth()-1, 1); pintarCalendario(); };
+$('mesSig').onclick = () => { est.mesVista = new Date(est.mesVista.getFullYear(), est.mesVista.getMonth()+1, 1); pintarCalendario(); };
+
+/* ---------- Personas ---------- */
+function pintarPersonas(){
+  const max = est.info.config.maxPersonasWeb;
+  $('personas').innerHTML = '';
+  for (let n=1; n<=max; n++){
+    const b = document.createElement('button');
+    b.className = 'op'+(n===est.personas?' sel':''); b.textContent = n;
+    b.onclick = () => { est.personas = n; cargarHoras(); paso(3); };
+    $('personas').appendChild(b);
+  }
+  const tel = est.info.config.telefono;
+  $('notaGrupo').textContent = '¿Sois más de '+max+'? '+(tel ? 'Llámanos al '+tel+' y te buscamos sitio.' : 'Contacta con el restaurante.');
+}
+
+/* ---------- Horas ---------- */
+// Al tocar un día se piden ya las horas para cualquier número de personas:
+// mientras el cliente elige cuántos son, la respuesta va llegando.
+function precargar(fecha){
+  if (est.pre && est.pre.fecha === fecha && Date.now() - est.pre.t < 60000) return;
+  est.pre = { fecha, t: Date.now(), p: api('horarios', { fecha, todas:true }).catch(() => null) };
+}
+async function cargarHoras(forzar){
+  const n = ++est.peticion, fecha = est.fecha, personas = est.personas;
+  $('horas').innerHTML = '<div class="cargando">Consultando horarios…</div>';
+  try {
+    let slots = null;
+    if (!forzar && est.pre && est.pre.fecha === fecha){
+      const pre = await est.pre.p;
+      if (pre && pre.porPersonas) slots = pre.porPersonas[personas];
+    }
+    if (!slots) slots = (await api('horarios', { fecha, personas })).slots;
+    const r = { slots };
+    if (n !== est.peticion || fecha !== est.fecha || personas !== est.personas) return;
+    if (!r.slots.length){
+      $('horas').innerHTML = '<p class="nota">No quedan horas disponibles para ese día y grupo. Elige otra fecha.</p>';
+      return;
+    }
+    const grupos = {};
+    r.slots.forEach(s => (grupos[s.servicio] = grupos[s.servicio] || []).push(s));
+    $('horas').innerHTML = '';
+    Object.keys(grupos).forEach(serv => {
+      $('horas').insertAdjacentHTML('beforeend', '<div class="grupo">'+esc(serv)+'</div>');
+      const caja = document.createElement('div'); caja.className = 'ops';
+      grupos[serv].forEach(s => {
+        const b = document.createElement('button'); b.className = 'op'; b.textContent = s.hora;
+        b.onclick = () => { est.slot = s; pintarResumen(); paso(4); };
+        caja.appendChild(b);
+      });
+      $('horas').appendChild(caja);
+    });
+  } catch(e){
+    if (n !== est.peticion) return;
+    $('horas').innerHTML = '<p class="nota">No se pudieron consultar los horarios. Espera unos segundos y vuelve a intentarlo.</p>';
+  }
+}
+
+/* ---------- Datos y confirmación ---------- */
+function textoResumen(){
+  return '<b>'+esc(fechaLarga(est.fecha))+' · '+esc(est.slot.hora)+'</b>'+est.personas+(est.personas===1?' persona':' personas');
+}
+function pintarResumen(){
+  $('resumen').innerHTML = textoResumen();
+  const c = leerLocal('pizzburger_contacto');
+  if (c) ['nombre','apellidos','email','telefono'].forEach(k => { if (!$(k).value && c[k]) $(k).value = c[k]; });
+}
+$('form').addEventListener('submit', async ev => {
+  ev.preventDefault();
+  if (est.enviando) return;
+  const d = { nombre:$('nombre').value.trim(), apellidos:$('apellidos').value.trim(), email:$('email').value.trim(),
+    telefono:$('telefono').value.trim(), alergias:$('alergias').value.trim(), web:$('web').value };
+  if (!d.nombre || !d.apellidos) return mensaje($('msg'),'error','Escribe tu nombre y apellidos.');
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(d.email)) return mensaje($('msg'),'error','Revisa el correo electrónico.');
+  if (d.telefono.replace(/\D/g,'').length < 9) return mensaje($('msg'),'error','Revisa el teléfono.');
+  est.enviando = true; $('confirmar').disabled = true;
+  mensaje($('msg'),'info','Guardando reserva…');
+  try {
+    const r = await api('reservar', Object.assign(d, { fecha:est.fecha, hora:est.slot.hora, servicio:est.slot.servicio, personas:est.personas }));
+    guardarLocal('pizzburger_contacto', { nombre:d.nombre, apellidos:d.apellidos, email:d.email, telefono:d.telefono });
+    $('resumenFinal').innerHTML = textoResumen()+'<br>A nombre de '+esc(d.nombre+' '+d.apellidos);
+    $('notaCorreo').textContent = r.correoEnviado
+      ? 'Te hemos enviado un correo a '+d.email+' con los detalles y un enlace por si necesitas cancelar.'
+      : 'Tu reserva está confirmada, pero no se pudo enviar el correo. Guarda estos datos.';
+    $('vReserva').classList.add('oculto'); $('vHecho').classList.remove('oculto');
+    window.scrollTo(0,0);
+  } catch(e){
+    const txt = String(e.message||'');
+    if (/acaba de ocuparse/.test(txt)) { mensaje($('msg'),'error',txt); est.pre = null; cargarHoras(true); setTimeout(()=>paso(3),1600); }
+    else if (e instanceof TypeError) mensaje($('msg'),'error','No se pudo confirmar. Revisa tu correo antes de repetir, por si ya se ha guardado.');
+    else mensaje($('msg'),'error','No se ha confirmado la reserva: '+txt);
+  } finally {
+    est.enviando = false; $('confirmar').disabled = false;
+  }
+});
+$('otra').onclick = () => { est.fecha=''; est.personas=0; est.slot=null; est.pre=null; $('alergias').value='';
+  $('vHecho').classList.add('oculto'); $('vReserva').classList.remove('oculto'); pintarCalendario(); paso(1); };
+
+/* ---------- Textos legales ---------- */
+document.querySelectorAll('[data-legal]').forEach(a => a.addEventListener('click', ev => {
+  ev.preventDefault();
+  const k = a.dataset.legal;
+  $('legalTitulo').textContent = k === 'condiciones' ? 'Condiciones de uso' : 'Política de privacidad';
+  $('legalTexto').textContent = (est.info && est.info.config[k]) || 'El restaurante todavía no ha publicado este texto.';
+  $('legalDialog').showModal();
+}));
+$('legalCerrar').onclick = () => $('legalDialog').close();
+
+/* ---------- Cancelación ---------- */
+async function vistaCancelar(id, codigo){
+  $('vReserva').classList.add('oculto'); $('vCancelar').classList.remove('oculto');
+  try {
+    const { reserva:r } = await api('verReserva', { id, codigo });
+    const datos = '<div class="resumen"><b>'+esc(fechaLarga(r.fecha))+' · '+esc(r.hora)+'</b>'+r.personas+' personas · a nombre de '+esc(r.nombre)+'</div>';
+    if (r.estado === 'Cancelada'){ $('cancelCuerpo').className=''; $('cancelCuerpo').innerHTML = datos+'<p>Esta reserva ya está cancelada.</p>'; return; }
+    if (!r.cancelable){ $('cancelCuerpo').className=''; $('cancelCuerpo').innerHTML = datos+'<p>Esta reserva ya no se puede cancelar desde aquí.</p>'; return; }
+    $('cancelCuerpo').className='';
+    $('cancelCuerpo').innerHTML = datos+'<p>¿Quieres cancelar esta reserva?</p><div class="botones"><button class="btn" id="btnCancelar">Cancelar mi reserva</button></div>';
+    $('btnCancelar').onclick = async () => {
+      $('btnCancelar').disabled = true; mensaje($('msgCancel'),'info','Cancelando…');
+      try { await api('cancelar', { id, codigo });
+        $('cancelCuerpo').innerHTML = datos+'<p><b>Reserva cancelada.</b> Te hemos enviado un correo de confirmación.</p>';
+        mensaje($('msgCancel'),'','');
+      } catch(e){ $('btnCancelar').disabled = false; mensaje($('msgCancel'),'error', e.message || 'No se pudo cancelar.'); }
+    };
+  } catch(e){
+    $('cancelCuerpo').className=''; $('cancelCuerpo').innerHTML = '<p>'+esc(e.message || 'No se pudo cargar la reserva.')+'</p>';
+  }
+}
+
+/* ---------- Inicio ---------- */
+(async function iniciar(){
+  const q = new URLSearchParams(location.search);
+  try {
+    est.info = await api('servicios');
+    const c = est.info.config;
+    $('marca').textContent = c.nombre || 'Pizzburger';
+    document.title = 'Reserva tu mesa · '+(c.nombre||'Pizzburger');
+    if (c.subtitulo) $('subtitulo').textContent = c.subtitulo;
+    if (c.logo){ $('logo').src = c.logo; $('logo').classList.remove('oculto'); }
+  } catch(e){
+    $('cal').innerHTML = '<p class="nota" style="grid-column:1/-1">No se pudieron cargar los horarios. Recarga la página.</p>';
+    return;
+  }
+  if (q.get('cancelar')) return vistaCancelar(q.get('cancelar'), q.get('codigo')||'');
+  const h = deIso(est.info.hoy);
+  est.mesVista = new Date(h.getFullYear(), h.getMonth(), 1);
+  pintarCalendario(); paso(1);
+})();
+</script>
+</body>
+</html>

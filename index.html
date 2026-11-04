@@ -106,6 +106,7 @@
             <div><label for="nombre">Nombre *</label><input id="nombre" autocomplete="given-name" maxlength="60" required></div>
             <div><label for="apellidos">Apellidos *</label><input id="apellidos" autocomplete="family-name" maxlength="80" required></div>
           </div>
+          <label for="email">Correo electrónico *</label><input id="email" type="email" autocomplete="email" maxlength="120" required>
           <label for="telefono">Teléfono *</label><input id="telefono" type="tel" autocomplete="tel" maxlength="30" required>
           <label for="alergias">Alergias o necesidades especiales</label><textarea id="alergias" maxlength="500"></textarea>
           <div class="trampa" aria-hidden="true"><label>Web<input id="web" tabindex="-1" autocomplete="off"></label></div>
@@ -122,9 +123,10 @@
       <h1>Reserva confirmada</h1>
       <p class="sub">¡Te esperamos!</p>
       <div class="resumen" id="resumenFinal"></div>
+      <p class="nota" id="notaCorreo" style="margin:0 0 16px"></p>
       <div class="aviso oculto" id="cancelBloque">
         <b>Guarda este enlace por si necesitas cancelar</b>
-        <p>No enviamos ningún correo. Copia el enlace o haz una captura de esta pantalla.</p>
+        <p>Es tu enlace personal. Cópialo o haz una captura de esta pantalla.</p>
         <input id="enlaceCancelar" readonly aria-label="Enlace para cancelar la reserva">
         <div class="botones"><button class="btn" id="copiarEnlace" type="button">Copiar enlace</button></div>
         <p class="tel" id="notaTel"></p>
@@ -285,7 +287,7 @@ function textoResumen(){
 function pintarResumen(){
   $('resumen').innerHTML = textoResumen();
   const c = leerLocal('pizzburger_contacto');
-  if (c) ['nombre','apellidos','telefono'].forEach(k => { if (!$(k).value && c[k]) $(k).value = c[k]; });
+  if (c) ['nombre','apellidos','email','telefono'].forEach(k => { if (!$(k).value && c[k]) $(k).value = c[k]; });
 }
 // Teléfono del local (si está puesto en el panel) como enlace para llamar
 function htmlTelefono(){
@@ -316,23 +318,27 @@ $('copiarEnlace').onclick = async () => {
 $('form').addEventListener('submit', async ev => {
   ev.preventDefault();
   if (est.enviando) return;
-  const d = { nombre:$('nombre').value.trim(), apellidos:$('apellidos').value.trim(),
+  const d = { nombre:$('nombre').value.trim(), apellidos:$('apellidos').value.trim(), email:$('email').value.trim(),
     telefono:$('telefono').value.trim(), alergias:$('alergias').value.trim(), web:$('web').value };
   if (!d.nombre || !d.apellidos) return mensaje($('msg'),'error','Escribe tu nombre y apellidos.');
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(d.email)) return mensaje($('msg'),'error','Revisa el correo electrónico.');
   if (d.telefono.replace(/\D/g,'').length < 9) return mensaje($('msg'),'error','Revisa el teléfono.');
   est.enviando = true; $('confirmar').disabled = true;
   mensaje($('msg'),'info','Guardando reserva…');
   try {
     const r = await api('reservar', Object.assign(d, { fecha:est.fecha, hora:est.slot.hora, servicio:est.slot.servicio, personas:est.personas }));
-    guardarLocal('pizzburger_contacto', { nombre:d.nombre, apellidos:d.apellidos, telefono:d.telefono });
+    guardarLocal('pizzburger_contacto', { nombre:d.nombre, apellidos:d.apellidos, email:d.email, telefono:d.telefono });
     $('resumenFinal').innerHTML = textoResumen()+'<br>A nombre de '+esc(d.nombre+' '+d.apellidos);
+    $('notaCorreo').textContent = r.correoEnviado
+      ? 'Te hemos enviado un correo a '+d.email+' con los detalles. Si no lo ves, mira en la carpeta de spam. Unas 2 horas antes te enviaremos un recordatorio.'
+      : 'Tu reserva está confirmada, pero no hemos podido enviarte el correo. Guarda el enlace de abajo.';
     pintarCancelar(r);
     $('vReserva').classList.add('oculto'); $('vHecho').classList.remove('oculto');
     window.scrollTo(0,0);
   } catch(e){
     const txt = String(e.message||'');
     if (/acaba de ocuparse/.test(txt)) { mensaje($('msg'),'error',txt); est.pre = null; cargarHoras(true); setTimeout(()=>paso(3),1600); }
-    else if (e instanceof TypeError) mensaje($('msg'),'error','No se pudo confirmar. Comprueba tu conexión y, si no estás seguro de que se haya guardado, llámanos antes de repetir.');
+    else if (e instanceof TypeError) mensaje($('msg'),'error','No se pudo confirmar. Revisa tu correo antes de repetir, por si ya se ha guardado, o llámanos.');
     else mensaje($('msg'),'error', /^Ya hay una reserva/.test(txt) ? txt : 'No se ha confirmado la reserva: '+txt);
   } finally {
     est.enviando = false; $('confirmar').disabled = false;

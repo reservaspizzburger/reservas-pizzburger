@@ -90,11 +90,10 @@ Hecho:
 - Correo eliminado del todo (web, panel, base de datos, función y acción de GitHub). Probado en Postgres local (base nueva y actualizada desde la antigua) y en navegador.
 
 Pendiente (lo hace Ander):
-1. Comprobar que la acción «Supabase» termina en verde tras subir este cambio (GitHub → Actions).
-2. Borrar de GitHub → Settings → Secrets → Actions los secretos que ya no se usan: `CLAVE_CORREO`, `GMAIL_APP_PASSWORD` y `SUPABASE_ACCESS_TOKEN`. Revocar ese token en Supabase → Account → Access Tokens. En Supabase → Edge Functions, si aparece `correo`, borrarla. Opcional: quitar la contraseña de aplicación en la cuenta de Gmail.
-3. Crear en Supabase los usuarios `equipo@` y `admin@` (marcando *Auto Confirm User*) y desactivar «Allow new users to sign up».
-4. En el panel → Personalización: poner el teléfono del local (es el que ve el cliente al confirmar y al cancelar).
-5. En el panel → Clientes → Importar de Vento: subir el CSV de fichas de clientes. Opcional: el CSV de reservas antiguas.
-6. Limpieza: borrar en GitHub → Actions las ejecuciones fallidas de «Supabase» y la rama `prueba-permisos`. Borrar el proyecto antiguo de Apps Script y la hoja de Google de reservas, que ya no se usan.
+1. Borrar de GitHub → Settings → Secrets → Actions los secretos que ya no se usan: `CLAVE_CORREO`, `GMAIL_APP_PASSWORD` y `SUPABASE_ACCESS_TOKEN`. Revocar ese token en Supabase → Account → Access Tokens. En Supabase → Edge Functions, si aparece `correo`, borrarla. Opcional: quitar la contraseña de aplicación en la cuenta de Gmail.
+2. Crear en Supabase los usuarios `equipo@` y `admin@` (marcando *Auto Confirm User*) y desactivar «Allow new users to sign up».
+3. En el panel → Personalización: poner el teléfono del local (es el que ve el cliente al confirmar y al cancelar).
+4. En el panel → Clientes → Importar de Vento: subir el CSV de fichas de clientes. Opcional: el CSV de reservas antiguas.
+5. Limpieza: borrar en GitHub → Actions las ejecuciones fallidas de «Supabase» y la rama `prueba-permisos`. Borrar el proyecto antiguo de Apps Script y la hoja de Google de reservas, que ya no se usan.
 
 Ideas para más adelante: textos legales (condiciones y privacidad), activar las comidas de fin de semana, enlazar la reserva desde la web nueva de Pizzburger.

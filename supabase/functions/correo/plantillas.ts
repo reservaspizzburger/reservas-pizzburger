@@ -30,10 +30,6 @@ function detalles(r: Reserva): string {
     (r.alergias ? fila('Alergias / notas', r.alergias) : '') + '</table>';
 }
 
-function datosCliente(r: Reserva): string {
-  return `<p style="font-size:14px;color:#555">${esc(`${r.nombre ?? ''} ${r.apellidos ?? ''}`.trim())}<br>${esc(r.telefono)}<br>${esc(r.email)}<br>Mesa: ${esc(r.mesa || 'sin asignar')}</p>`;
-}
-
 function boton(href: string, txt: string, fondo: string, color: string): string {
   return `<a href="${esc(href)}" style="display:inline-block;margin:4px 8px 4px 0;padding:10px 16px;border-radius:7px;background:${fondo};color:${color};text-decoration:none;font-weight:600;font-size:14px">${txt}</a>`;
 }
@@ -72,7 +68,7 @@ function plantilla(c: Config, titulo: string, cuerpo: string): string {
 /** Devuelve el correo a enviar, o null si no hay destinatario / tipo desconocido. */
 export function construir(tipo: string, r: Reserva, c: Config): Correo | null {
   const nombre = c.nombre || 'Pizzburger';
-  const alRestaurante = tipo.startsWith('aviso_') || tipo === 'prueba';
+  const alRestaurante = tipo === 'prueba';
   const para = alRestaurante ? (c.emailRestaurante || '') : (r.email || '');
   if (!para) return null;
   const hola = `<p>Hola ${esc(r.nombre)},</p>`;
@@ -83,26 +79,9 @@ export function construir(tipo: string, r: Reserva, c: Config): Correo | null {
       asunto = c.asuntoConfirmacion || `Reserva confirmada · ${nombre}`;
       cuerpo = hola + `<p>${esc(c.textoConfirmacion || 'Tu reserva está confirmada. ¡Te esperamos!')}</p>` + det + enlaces(r, c);
       break;
-    case 'modificacion':
-      asunto = `Reserva modificada · ${nombre}`;
-      cuerpo = hola + '<p>Hemos actualizado tu reserva. Estos son los datos nuevos:</p>' + det + enlaces(r, c);
-      break;
     case 'recordatorio':
       asunto = `Recordatorio de tu reserva · ${nombre}`;
       cuerpo = hola + `<p>${esc(c.textoRecordatorio || 'Te recordamos tu próxima reserva.')}</p>` + det + enlaces(r, c);
-      break;
-    case 'cancelacion':
-      asunto = `Reserva cancelada · ${nombre}`;
-      cuerpo = hola + '<p>Tu reserva ha quedado cancelada.</p>' + det +
-        `<p>Si ha sido un error o quieres otra fecha, puedes volver a reservar${c.urlPublica ? ` <a href="${esc(c.urlPublica)}">aquí</a>` : ''}.</p>`;
-      break;
-    case 'aviso_nueva':
-      asunto = `Nueva reserva web: ${r.nombre} · ${fechaLarga(r.fecha)} ${r.hora} · ${r.personas} pax`;
-      cuerpo = '<p>Ha entrado una reserva desde la web.</p>' + det + datosCliente(r);
-      break;
-    case 'aviso_cancelacion':
-      asunto = `Cancelación: ${r.nombre} · ${fechaLarga(r.fecha)} ${r.hora}`;
-      cuerpo = '<p>El cliente ha cancelado su reserva desde el enlace del correo.</p>' + det + datosCliente(r);
       break;
     case 'prueba':
       asunto = `Prueba · Reservas ${nombre}`;
